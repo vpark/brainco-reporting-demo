@@ -28,12 +28,12 @@
     { view: 'vault', label: 'Vault', title: 'The vault keeps one folder per quarter', sub: 'Q2 2026 is generated and approved. Q3 2026 is new and in progress.' },
     { view: 'ingest', label: 'Q3 ingestion', title: 'Every Q3 file, where it came from and what was extracted', sub: 'Pages, cells and formulas, transcript words and the figures each file registered.' },
     { view: 'templates', label: 'Template', title: 'One configured template produces the same four files every quarter', sub: 'Sections, data tags and the source each tag is bound to, plus the firm’s rules.' },
-    { view: 'graph', label: 'Graph', title: 'Which document feeds which figure, and which figure feeds which section', sub: 'One seeded NAV discrepancy and the flagged IRR change, both resolved.' },
+    { view: 'graph', label: 'How it’s built', title: 'Each section has a recipe: ingredients, rules, steps, output', sub: 'Fund II performance shown; the graph view keeps the evidence flow and both resolved flags.' },
     { view: 'outputs', generated: true, label: 'Generate', title: 'Generate the package from cited evidence', sub: 'Four files, every claim verified, the same figures everywhere.' },
     { view: 'detail', drawer: 'C1', tab: 'analysis', label: 'Output detail', title: 'Click any sentence to see where it came from', sub: 'The 11.8% opens the model cell, its precedents and the calculation.' }
   ];
 
-  var state = { view: 'connections', drawer: null, tab: null, approved: false, generated: false, running: -1, history: false };
+  var state = { view: 'connections', drawer: null, tab: null, approved: false, generated: false, running: -1, history: false, recipe: 'perf', gtab: 'recipe' };
 
   var LEGEND = {
     today: { label: 'Exists today', note: 'Built in a current Brain Co. engagement' },
@@ -126,7 +126,7 @@
 
   /* ---------- views ---------- */
 
-  var NAV = [['connections', 'Connections'], ['vault', 'Vault'], ['templates', 'Templates'], ['graph', 'Graph'], ['outputs', 'Outputs']];
+  var NAV = [['connections', 'Connections'], ['vault', 'Vault'], ['templates', 'Templates'], ['graph', 'How it’s built'], ['outputs', 'Outputs']];
   function navKey() { return state.view === 'ingest' ? 'vault' : state.view === 'detail' ? 'outputs' : state.view; }
   function sidebar() {
     return '<div class="firm"><span class="avatar">MC</span><div><b>' + esc(P.firm) + '</b><span>Signed in · Sam Ortiz</span></div></div>' +
@@ -187,7 +187,7 @@
     var sections = ['Fund overview', 'Fund II performance', 'Portfolio updates', 'Valuation changes', 'Capital activity', 'Outlook'];
     return '<section class="view" data-element="template">' + head('Templates · configured for ' + esc(P.shortFirm), 'Meridian LP package 2026', chip('proposed', 'Configured per customer, no code') + chip('today', 'Brand-compliant output across Word, PPT and Excel')) +
       '<div class="tpl-outs">' + outs.map(function (o, i) { return '<div class="tpl-out' + (i === 0 ? ' on' : '') + '"><b>' + o[0] + '</b><span>' + o[1] + ' · ' + o[2] + '</span></div>'; }).join('') + '</div>' +
-      '<div class="tpl-grid"><div><div class="label">LP letter sections</div><ol class="tpl-sections">' + sections.map(function (s, i) { return '<li' + (i === 1 ? ' class="on"' : '') + '>' + s + '</li>'; }).join('') + '</ol></div>' +
+      '<div class="tpl-grid"><div><div class="label">LP letter sections</div><ol class="tpl-sections">' + SECTION_KEYS.map(function (s, i) { return '<li' + (i === 1 ? ' class="on"' : '') + '><button type="button" class="tpl-sec" data-recipe="' + s[0] + '">' + s[1] + '</button></li>'; }).join('') + '</ol><p class="muted small">Click a section to see its recipe.</p></div>' +
       '<div data-element="variables"><div class="label">Data tags and source bindings ' + chip('proposed', 'Figure registry bindings') + '</div><table class="tbl"><thead><tr><th>Tag</th><th>Bound to</th><th>Value</th></tr></thead><tbody>' + vars.map(function (v) { return '<tr><td><code>' + esc(v[0]) + '</code></td><td>' + esc(v[1]) + '</td><td>' + cite(v[2]) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
       '<div><div class="label">Rules</div><dl class="rules">' + P.config.map(function (k) { return '<div><dt>' + esc(k.k) + '</dt><dd>' + esc(k.v) + '</dd></div>'; }).join('') + '</dl></div></div></section>';
   }
@@ -214,8 +214,66 @@
     var issues = '<aside class="issues" data-element="discrepancy"><header class="view-head small"><div><div class="label">Flags</div><h3>2 flags, both resolved</h3></div>' + chip('proposed', 'Verification against the registry') + '</header>' +
       '<article class="issue bad"><span class="st st-conflict">Seeded discrepancy</span><b>Fund II NAV disagrees</b><p>Valuation model ' + cite('M4') + ' $821.1M; fund-admin statement ' + cite('A2') + ' $830.5M. The administrator had not booked the $9.4M Cobalt markdown ' + cite('M3') + '.</p><p class="res"><b>Resolved.</b> The valuation model is the source of truth for NAV; note added for the administrator. Reviewer: Sam Ortiz, Oct 20.</p><p class="muted small">Planted in the sample data to show the check working.</p></article>' +
       '<article class="issue warn"><span class="st st-review">Needs explanation</span><b>Net IRR 14.2% → 11.8%, −240 bps</b><p>Over the 100 bps rule ' + cite('M1') + ' ' + cite('P1') + '.</p><p class="res"><b>Resolved.</b> Dana Whitfield’s voice note explains it ' + cite('T1') + ' ' + cite('T3') + ', Oct 21.</p></article></aside>';
-    return '<section class="view" data-element="graph">' + head('Graph · ' + P.package.name, 'How evidence flows into the report', chip('proposed', 'Evidence graph across documents, figures and sections')) +
-      '<div class="graph-wrap">' + svg + issues + '</div></section>';
+    return '<div class="graph-wrap" data-element="graph"><div>' + chip('proposed', 'Evidence graph across documents, figures and sections') + svg + '</div>' + issues + '</div>';
+  }
+
+  /* ---------- section recipes ---------- */
+
+  var SECTION_KEYS = [['overview', 'Fund overview'], ['perf', 'Fund II performance'], ['port', 'Portfolio updates'], ['val', 'Valuation changes'], ['cap', 'Capital activity'], ['outlook', 'Outlook']];
+  function sectionName(k) { return SECTION_KEYS.filter(function (s) { return s[0] === k; })[0][1]; }
+  function sectionStats(k) { var n = sectionName(k); return P.sections.filter(function (s) { return s.name === n; })[0]; }
+  function recipe(k) {
+    var bps = Math.round((F.irr - F.irrPrior) * 100), tvpi = (F.distributions + F.nav) / F.paidIn, dpi = F.distributions / F.paidIn;
+    var cobalt = ((108.6 / 118.0 - 1) * 100).toFixed(1).replace('-', MINUS);
+    var house = 'House style from the Q2 2026 LP letter, approved v4';
+    var chain = 'Approval chain: ' + P.config.filter(function (c) { return c.k === 'Approval chain'; })[0].v;
+    var R = {
+      perf: { sources: ['M1', 'P1', 'T1', 'T2', 'T3', 'T4', 'D1', 'D2', 'D3', 'W1'], figures: [['M1', 'Net IRR, Q3', '11.8%'], ['P1', 'Net IRR, Q2', '14.2%'], ['M2', 'Northwind fair value', '$249.4M'], ['M3', 'Cobalt fair value', '$108.6M']], prior: S.P1.quote,
+        rules: ['Explain any net IRR move of 100 bps or more, or a NAV move of 5% or more', '60 words max for the change explanation', 'Name the holdings that drive the change', house, chain],
+        derived: [MINUS + Math.abs(bps) + ' bps = ' + F.irr.toFixed(1) + '% ' + MINUS + ' ' + F.irrPrior.toFixed(1) + '%, over the 100 bps rule', 'Cobalt ' + cobalt + '% = 108.6 ÷ 118.0 ' + MINUS + ' 1', 'Northwind ' + MINUS + '12.6 = 249.4 ' + MINUS + ' 262.0'],
+        retrieve: '8 passages: partner interview T1–T4, Northwind deck p.6, Cobalt deck p.4, covenant amendment p.2, trade press', draft: '6 cited sentences (C1–C6)', verify: 'Numbers match the registry; each claim checked against its passage; 1 conflict caught in C4 (“covenant breach”)', review: P.edit.reviewer + ' corrected C4 as a factual correction, ' + P.edit.when,
+        output: ['LP letter, page 2, Fund II paragraph', 'LP deck, slide 7 commentary', 'Performance schedules, note (1)'] },
+      overview: { sources: ['A1', 'M4', 'P1'], figures: [['M4', 'Fund II NAV', '$821.1M'], ['A1', 'Distributions since inception', '$224.0M']], prior: 'Q2 2026 letter, fund overview: one line per fund with NAV and net IRR.',
+        rules: ['One line per fund, in vintage order', house, chain], derived: ['Net TVPI ' + tvpi.toFixed(2) + 'x = (224.0 + 821.1) ÷ 722.0'], retrieve: 'Fund summaries from the valuation model and capital accounts', draft: 'One cited line per fund', verify: 'Every figure matches the registry', review: P.people.ir.name + ' accepted without edit', output: ['LP letter, page 1', 'LP deck, slide 3'] },
+      port: { sources: ['D2', 'D3', 'W1'], figures: [['M2', 'Northwind fair value', '$249.4M'], ['M3', 'Cobalt fair value', '$108.6M']], prior: 'Q2 2026 letter, portfolio updates for each holding.',
+        rules: ['One paragraph per holding with an operating update', 'Cite the board deck for every operating claim', house, chain], derived: [], retrieve: 'Board-deck passages for each holding', draft: 'One cited paragraph per holding', verify: 'Each claim checked against its board-deck passage', review: P.people.ir.name + ' accepted without edit', output: ['LP letter, pages 3–4', 'LP deck, slides 9–16'] },
+      val: { sources: ['M2', 'M3', 'M4', 'A2', 'D1'], figures: [['M2', 'Northwind fair value', '$249.4M'], ['M3', 'Cobalt fair value', '$108.6M'], ['M4', 'Fund II NAV', '$821.1M']], prior: 'Q2 2026 letter, valuation changes table.',
+        rules: ['List every holding whose value moved 4% or more', 'Use the valuation model as the source of truth for NAV', house, chain], derived: ['Cobalt ' + cobalt + '%', 'NAV ' + MINUS + (F.navPrior - F.nav).toFixed(1) + ' = 821.1 ' + MINUS + ' 844.6'], retrieve: 'Valuation sheet rows, the administrator statement and the covenant amendment', draft: 'Valuation-change table with cited notes', verify: 'Seeded NAV discrepancy against the administrator caught and resolved', review: P.people.ir.name + ' added a note for the administrator', output: ['LP letter, page 4', 'Performance schedules, NAV Bridge tab'] },
+      cap: { sources: ['A1'], figures: [['A1', 'Paid-in capital', '$722.0M'], ['A1', 'Distributions', '$224.0M']], prior: 'Q2 2026 letter, capital activity.',
+        rules: ['State calls and distributions for the quarter', house, chain], derived: ['DPI ' + dpi.toFixed(2) + 'x = 224.0 ÷ 722.0', 'Net TVPI ' + tvpi.toFixed(2) + 'x'], retrieve: 'Capital account ledger', draft: '2 cited sentences (C7–C8)', verify: 'Every figure matches the registry', review: P.people.ir.name + ' accepted without edit', output: ['LP letter, page 2', 'Capital account statements, one per LP'] },
+      outlook: { sources: ['W1', 'T4'], figures: [], prior: 'Q2 2026 letter, outlook.',
+        rules: ['No forecasts of returns', 'Market context must cite a dated source', house, chain], derived: [], retrieve: 'Trade press and partner commentary', draft: 'Short cited outlook paragraph', verify: '1 market claim needs reviewer confirmation', review: 'Open: ' + P.people.ir.name + ' to confirm the market claim', output: ['LP letter, page 6'] }
+    };
+    return R[k];
+  }
+  function recipeHTML(k) {
+    var r = recipe(k), st = sectionStats(k), ok = st.verified === st.total;
+    var steps = [
+      ['Retrieve passages', r.retrieve, 'proposed'],
+      ['Pull registered figures', r.figures.length ? r.figures.map(function (x) { return x[1] + ' ' + x[2]; }).join(' · ') : 'No figures in this section', 'proposed'],
+      ['Compute derived values', r.derived.length ? r.derived.join(' · ') : 'None needed', 'proposed'],
+      ['Draft with citations', r.draft, 'today'],
+      ['Verify', r.verify, 'proposed'],
+      ['Human review', r.review, 'today'],
+      ['Approve', k === 'outlook' ? 'Waiting on review' : P.people.partner.name + ' signed off ' + P.timeline.signedOff + (state.approved ? '; CFO approved' : '; CFO approval pending'), 'proposed']
+    ];
+    var why = { today: 'Shared ML service drafting through the DAG; content feedback capture', proposed: 'Recipe engine and figure registry' };
+    return '<section class="recipe" data-element="recipe"><header class="view-head small"><div><div class="label">Recipe</div><h3>' + esc(sectionName(k)) + '</h3></div>' + chip('proposed', 'Recipe engine and figure registry') + '</header>' +
+      '<div class="rc-grid"><div class="rc-block"><div class="label">Ingredients</div><p class="rc-k">Vault sources</p><div class="rc-chips">' + r.sources.map(cite).join('') + chip('today', 'Source-linked citation chips') + '</div>' +
+      (r.figures.length ? '<p class="rc-k">Registry figures</p><ul class="rc-figs">' + r.figures.map(function (x) { return '<li><span>' + esc(x[1]) + '</span>' + tag(x[0], x[2]) + '</li>'; }).join('') + '</ul>' : '') +
+      '<p class="rc-k">Prior-period text it continues</p><p class="rc-prior">' + esc(r.prior) + '</p></div>' +
+      '<div class="rc-block"><div class="label">Rules · configured for ' + esc(P.shortFirm) + '</div><ul class="rc-rules">' + r.rules.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+      '<div class="label rc-out-label">Output</div><ul class="rc-rules">' + r.output.map(function (o) { return '<li><b>' + esc(o) + '</b></li>'; }).join('') + '</ul><p><span class="st ' + (ok ? 'st-ok' : 'st-review') + '">' + (ok ? 'Verified' : 'Needs review') + '</span> ' + st.verified + ' of ' + st.total + ' claims verified</p></div></div>' +
+      '<div class="rc-block"><div class="label">Steps</div><ol class="rc-steps">' + steps.map(function (s, i) { return '<li><span class="stage-n">' + (i + 1) + '</span><b>' + s[0] + '</b><span>' + esc(s[1]) + '</span>' + chip(s[2], why[s[2]]) + '</li>'; }).join('') + '</ol></div></section>';
+  }
+  function builtView() {
+    var picker = '<nav class="rc-picker" data-element="sections" aria-label="Sections">' + chip('proposed', 'Configured template sections') + SECTION_KEYS.map(function (s) {
+      var on = state.recipe === s[0];
+      return '<button type="button" class="rc-pick' + (on ? ' on' : '') + '" data-recipe="' + s[0] + '"' + (on ? ' aria-current="true"' : '') + '>' + s[1] + '</button>';
+    }).join('') + '</nav>';
+    var g = state.gtab === 'graph';
+    var tabs = '<div class="drawer-tabs gtabs" role="tablist"><button type="button" role="tab" class="dtab' + (g ? '' : ' on') + '" aria-selected="' + !g + '" data-gtab="recipe">Recipe</button><button type="button" role="tab" class="dtab' + (g ? ' on' : '') + '" aria-selected="' + g + '" data-gtab="graph">Graph view</button></div>';
+    return '<section class="view view-built" data-element="built">' + head('How it’s built · ' + P.package.name, g ? 'How evidence flows into the report' : 'The recipe for each section', chip('proposed', 'Recipe engine and figure registry')) + tabs + (g ? graphView() : '<div class="rc-wrap">' + picker + recipeHTML(state.recipe) + '</div>') + '</section>';
   }
 
   var STAGES = [['Ingest', '8 files parsed'], ['Index', '1,912 passages'], ['Register figures', P.package.figures + ' figures'], ['Draft from cited evidence', '214 claims'], ['Trace sentences', 'every sentence to its span'], ['Verify', '214 checked · 2 flags resolved'], ['Ready for review', '4 files']];
@@ -243,7 +301,8 @@
   function letterDoc() {
     var fundII = P.letter.slice(0, 6), capital = P.letter.slice(6);
     return '<article class="paper letter-paper" data-doc="letter"><header class="paper-head"><span class="paper-mark">' + esc(P.firm) + '</span><span>Letter to Limited Partners · ' + P.period.quarterWord + '</span></header>' +
-      '<h4>' + esc(F.short) + '</h4><p>' + fundII.map(sentenceHTML).join('') + '</p><p>' + capital.map(sentenceHTML).join('') + '</p>' +
+      '<h4><button type="button" class="sec-head" data-recipe-drawer="perf" title="See how this section is built">' + esc(F.short) + ' performance</button></h4><p>' + fundII.map(sentenceHTML).join('') + '</p>' +
+      '<h4><button type="button" class="sec-head" data-recipe-drawer="cap" title="See how this section is built">Capital activity</button></h4><p>' + capital.map(sentenceHTML).join('') + '</p>' +
       '<footer class="paper-foot"><span>Confidential</span><span>Page 2</span></footer></article>';
   }
 
@@ -393,6 +452,7 @@
   function drawerHTML() {
     var close = '<button type="button" class="drawer-close" data-close="1" aria-label="Close">×</button>';
     if (state.drawer === 'BOUNDARY') return close + boundaryHTML();
+    if (state.drawer.indexOf('R:') === 0) return close + recipeHTML(state.drawer.slice(2));
     if (state.drawer.indexOf('S:') === 0) return close + sourceView(state.drawer.slice(2));
     var c = claimById(state.drawer), tabs = tabsFor(c);
     var tab = tabs.some(function (t) { return t[0] === state.tab; }) ? state.tab : tabs[0][0];
@@ -404,7 +464,7 @@
   /* ---------- shell ---------- */
 
   function mainView() {
-    return ({ connections: connectionsView, vault: vaultView, ingest: ingestView, templates: templatesView, graph: graphView, outputs: outputsView, detail: detailView }[state.view] || connectionsView)();
+    return ({ connections: connectionsView, vault: vaultView, ingest: ingestView, templates: templatesView, graph: builtView, outputs: outputsView, detail: detailView }[state.view] || connectionsView)();
   }
 
   function render() {
@@ -474,6 +534,8 @@
     state.running = -1;
     state.approved = false;
     state.history = false;
+    state.recipe = 'perf';
+    state.gtab = 'recipe';
     document.body.dataset.step = String(current);
     render();
     updateCaption();
@@ -509,11 +571,14 @@
         state.sel = b.dataset.cite;
         var inSent = b.closest('.sent');
         if (inSent) openSentence(inSent.dataset.claim, tabOfKind(S[b.dataset.cite].kind));
-        else if (b.closest('#drawer') && state.drawer && state.drawer.indexOf('S:') !== 0 && state.drawer !== 'BOUNDARY' && claimById(state.drawer).cites.indexOf(b.dataset.cite) >= 0) openSentence(state.drawer, tabOfKind(S[b.dataset.cite].kind));
+        else if (b.closest('#drawer') && state.drawer && state.drawer.indexOf('S:') !== 0 && state.drawer !== 'BOUNDARY' && claimById(state.drawer) && claimById(state.drawer).cites.indexOf(b.dataset.cite) >= 0) openSentence(state.drawer, tabOfKind(S[b.dataset.cite].kind));
         else { state.drawer = 'S:' + b.dataset.cite; render(); }
       }
       else if (b.dataset.file) { state.drawer = 'S:' + sourcesOfFile(b.dataset.file)[0]; render(); }
       else if (b.dataset.view) { state.view = b.dataset.view; if (state.view !== 'detail') state.drawer = null; render(); }
+      else if (b.dataset.recipe) { state.view = 'graph'; state.gtab = 'recipe'; state.recipe = b.dataset.recipe; state.drawer = null; render(); }
+      else if (b.dataset.recipeDrawer) { state.drawer = 'R:' + b.dataset.recipeDrawer; render(); }
+      else if (b.dataset.gtab) { state.gtab = b.dataset.gtab; render(); }
       else if (b.dataset.dtab) { state.tab = b.dataset.dtab; render(); }
       else if (b.dataset.drawer) { state.drawer = b.dataset.drawer; render(); }
       else if (b.dataset.close) { state.drawer = null; render(); }
@@ -540,7 +605,7 @@
   document.title = 'FinanceOS · ' + P.firm + ' (sample data)';
   document.getElementById('topbar').innerHTML = '<div class="brand"><i class="brand-mark" aria-hidden="true"></i><span>Brain Co.</span><span class="product">FinanceOS</span></div>' +
     '<div class="crumb">' + esc(P.firm) + ' / <b>' + esc(P.package.name) + '</b></div>' +
-    '<div class="top-actions"><span class="sample" data-marker="sample">Sample data - fictional</span></div>';
+    '<div class="top-actions"></div>';
   document.getElementById('legend').innerHTML = '<div class="legend-key" aria-label="Legend">' + ['today', 'proposed', 'assumption'].map(function (k) { return chip(k); }).join('') + '</div>';
   document.getElementById('demo-nav').innerHTML = capture ? '' : tourNav();
   if (capture) document.documentElement.classList.add('capture');
