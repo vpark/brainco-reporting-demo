@@ -1,9 +1,8 @@
-# Explain the change: a sample sales demo
+# FinanceOS: a sample reporting prototype
 
-An interactive walkthrough prepared by Vincent Park for a Brain Co. product case study. It opens on a quarter's source vault and report builder, then shows one consequential moment in a quarterly LP reporting workflow: a figure changes, the responsible partner explains it, a cited draft is reviewed, and one approval updates the LP deck, Excel schedule and letter together.
+A clickable prototype prepared by Vincent Park for a Brain Co. product case study. It walks one quarterly LP reporting cycle for a fictional private-equity firm: connected sources, a vault organized by quarter, ingestion, the report template, a graph of which document feeds which figure, generation, and an LP letter where every sentence opens its source (voice clip, PDF passage, Excel cell and calculation).
 
-All firms, people and figures are fictional sample data.
+All firms, people, figures and audio are fictional sample data.
 
-- Open index.html, or add ?prospect=harborline to see the same flow for a real estate manager.
-- Use the arrow keys or the step controls to move through steps 0-6.
-
+- Open index.html and use the left navigation, or add ?step=0 through ?step=6 to follow the guided track.
+- Click any sentence or figure in the LP letter to see where it came from.

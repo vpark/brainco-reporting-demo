@@ -1,25 +1,39 @@
 /*
- * "Explain the change" sales demo. Classic script so it runs from file://.
- * Contract (consumed by the video pipeline, do not change):
- *   ?step=0-6  ?prospect=meridian|harborline  ?capture=1
- *   window.demo = { goTo(n), steps: 7, prospect }
- *   document.body.dataset.step mirrors the current step; Left/Right arrows navigate.
- * Additions: window.demo.step, next(), prev(), setProspect(id), settled() and
- *   document.body.dataset.settled ("true" once the step transition has finished).
+ * FinanceOS prototype: connections, vault, templates, graph and outputs with cited sources.
+ * Classic script so it runs from file://. All data is fictional (data/demo-data.js).
+ * Guided-tour contract:
+ *   ?step=0-6 opens a state of the demo track; ?capture=1 hides the track navigation for recording.
+ *   window.demo = { goTo(n), steps: 7, step, next(), prev(), settled() }; goTo resolves once settled.
+ *   body[data-step] mirrors the tour state; body[data-settled] is "true" once transitions finish.
+ *   Left/Right arrow keys move through the tour.
  */
 (function () {
   'use strict';
 
-  var DATA = window.BRAINCO_DEMO_DATA;
+  var P = window.BRAINCO_DEMO_DATA;
+  var S = P.sources;
+  var F = P.fund;
   var STEP_COUNT = 7;
   var MINUS = '\u2212';
+  var AUDIO = 'assets/audio/partner-interview-sample.m4a';
+  var AUDIO_SECONDS = 72;
   var params = new URLSearchParams(window.location.search);
   var capture = params.get('capture') === '1';
-  var prospectId = DATA.prospects[params.get('prospect')] ? params.get('prospect') : DATA.defaultProspect;
   var current = clampStep(params.get('step'));
-  var P = DATA.prospects[prospectId];
   var settlePromise = Promise.resolve();
   var settleToken = 0;
+
+  var TOUR = [
+    { view: 'connections', label: 'Connections', title: 'Connected sources feed the ingestion engine', sub: 'Google Drive and the Northwind data room stay in sync; each file type is parsed its own way.' },
+    { view: 'vault', label: 'Vault', title: 'The vault keeps one folder per quarter', sub: 'Q2 2026 is generated and approved. Q3 2026 is new and in progress.' },
+    { view: 'ingest', label: 'Q3 ingestion', title: 'Every Q3 file, where it came from and what was extracted', sub: 'Pages, cells and formulas, transcript words and the figures each file registered.' },
+    { view: 'templates', label: 'Template', title: 'One configured template produces the same four files every quarter', sub: 'Sections, data tags and the source each tag is bound to, plus the firm’s rules.' },
+    { view: 'graph', label: 'Graph', title: 'Which document feeds which figure, and which figure feeds which section', sub: 'One seeded NAV discrepancy and the flagged IRR change, both resolved.' },
+    { view: 'outputs', generated: true, label: 'Generate', title: 'Generate the package from cited evidence', sub: 'Four files, every claim verified, the same figures everywhere.' },
+    { view: 'detail', drawer: 'C1', tab: 'analysis', label: 'Output detail', title: 'Click any sentence to see where it came from', sub: 'The 11.8% opens the model cell, its precedents and the calculation.' }
+  ];
+
+  var state = { view: 'connections', drawer: null, tab: null, approved: false, generated: false, running: -1, history: false };
 
   var LEGEND = {
     today: { label: 'Exists today', note: 'Built in a current Brain Co. engagement' },
@@ -27,9 +41,19 @@
     assumption: { label: 'Assumption', note: 'Needs validation in the pilot' }
   };
 
-  var STEP_LABELS = ['Overview', 'Diff', 'Explain', 'Draft', 'Review', 'Approve', 'Audit'];
+  var ICON = {
+    excel: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1.5" width="10" height="9" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M1 4.6h10M4.6 1.5v9" stroke="currentColor" stroke-width="1.1"/></svg>',
+    voice: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 5v2M4 3.5v5M6 2v8M8 3.5v5M10 5v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    pdf: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.2h4.2L9.5 3.5v7.3H3z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M4.5 6h3M4.5 8h3" stroke="currentColor" stroke-width="1"/></svg>',
+    web: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M1.6 6h8.8M6 1.4c-2 2.6-2 6.6 0 9.2M6 1.4c2 2.6 2 6.6 0 9.2" fill="none" stroke="currentColor" stroke-width="1"/></svg>',
+    letter: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M6 3.4V6l1.8 1.2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+    check: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.3l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    arrow: '<svg viewBox="0 0 16 10" aria-hidden="true"><path d="M1 5h13M10 1.5L14 5l-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    lock: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="5.2" width="7" height="5.3" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M4 5.2V3.8a2 2 0 0 1 4 0v1.4" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
+    play: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 2.2v7.6L9.6 6z" fill="currentColor"/></svg>'
+  };
 
-  /* ---------- formatting ---------- */
+  /* ---------- helpers ---------- */
 
   function clampStep(v) {
     var n = parseInt(v, 10);
@@ -37,632 +61,377 @@
     return Math.max(0, Math.min(STEP_COUNT - 1, n));
   }
   function esc(s) {
-    return String(s).replace(/[&<>"]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
-    });
+    return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
   }
-  function pct(v) { return v.toFixed(1) + '%'; }
-  function money(v) { return '$' + v.toFixed(1) + 'M'; }
-  function moneyLong(v) { return '$' + v.toFixed(1) + ' million'; }
-  function num(v) { return v.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); }
-  function mult(v) { return v.toFixed(2) + 'x'; }
-  function signed(v, digits) {
-    var d = digits === undefined ? 1 : digits;
-    var s = Math.abs(v).toFixed(d);
-    return (v < 0 ? MINUS : v > 0 ? '+' : '') + s;
+  function mmss(t) { return Math.floor(t / 60) + ':' + ('0' + (t % 60)).slice(-2); }
+  function fileById(id) {
+    for (var i = 0; i < P.vault.length; i++) for (var j = 0; j < P.vault[i].files.length; j++) if (P.vault[i].files[j].id === id) return P.vault[i].files[j];
+    return null;
   }
-  function bps(d) { return (d < 0 ? MINUS : d > 0 ? '+' : '') + Math.abs(d) + ' bps'; }
-  function words(text) { return text.split(/\s+/).filter(Boolean).length; }
+  function sourcesOfFile(fid) { return Object.keys(S).filter(function (k) { return S[k].file === fid; }); }
+  function claimsCiting(ids) { return P.letter.filter(function (c) { return c.cites.some(function (x) { return ids.indexOf(x) >= 0; }); }); }
+  function plain(c) { return c.text.replace(/\{tag:[A-Z0-9]+\|([^}]+)\}/g, '$1'); }
 
-  /* ---------- derived data ---------- */
-
-  function derive(v) {
-    return {
-      tvpi: (v.distributions + v.nav) / v.paidIn,
-      tvpiPrior: (v.distributions + v.navPrior) / v.paidIn,
-      dpi: v.distributions / v.paidIn,
-      navPct: (v.nav / v.navPrior - 1) * 100,
-      dBps: Math.round((v.irr - v.irrPrior) * 100)
-    };
+  // XIRR over the cash-flow rows plus NAV as the terminal value (actual/365, bisection).
+  function cashRows() { return P.cashFlows.concat([['2026-09-30', F.nav, 'NAV, September 30 (terminal value)']]); }
+  function xirr(rows) {
+    var t0 = Date.parse(rows[0][0]);
+    function xnpv(r) { return rows.reduce(function (s, f) { return s + f[1] / Math.pow(1 + r, (Date.parse(f[0]) - t0) / 864e5 / 365); }, 0); }
+    var lo = -0.9, hi = 1;
+    for (var i = 0; i < 100; i++) { var m = (lo + hi) / 2; if (xnpv(m) > 0) lo = m; else hi = m; }
+    return (lo + hi) / 2;
   }
-  function focusVehicle() {
-    return P.vehicles.filter(function (v) { return v.id === P.focus.vehicleId; })[0];
-  }
-  function otherVehicles() {
-    return P.vehicles.filter(function (v) { return v.id !== P.focus.vehicleId; });
-  }
-  function excelRow() { return 5 + P.vehicles.indexOf(focusVehicle()); }
-  function excelCell() { return 'J' + excelRow(); }
-  function claimText(c, version) {
-    if (!c.edit) return c.text;
-    return c.text.replace('{edit}', version === 'v1' ? c.edit.before : c.edit.after);
-  }
-  function commentary(version) {
-    return P.claims.map(function (c) { return claimText(c, version); }).join(' ');
-  }
-  function editedClaim() {
-    return P.claims.filter(function (c) { return c.id === P.edit.claimId; })[0];
-  }
-  function workbookFile() { return P.shortFirm + '_' + P.period.label.replace(' ', '-') + '_LP_Schedules.xlsx'; }
-  function scheduleSheet() { return P.package.workbookTabs[0]; }
-  function priorVersion() { return P.focus.prior.version.replace('approved ', ''); }
-
-  function sources() {
-    var v = focusVehicle();
-    var m = P.focus.model;
-    var s = {
-      M1: { kind: 'model', short: m.cell, title: m.file + ' › ' + m.sheet + '!' + m.cell, detail: P.focus.metric + ', ' + P.period.label + ': ' + pct(v.irr) },
-      P1: { kind: 'prior', short: P.period.prior.split(' ')[0] + ' ' + priorVersion(), title: P.focus.prior.file + ', ' + P.focus.prior.version, detail: v.short + ' net IRR at ' + P.period.priorAsOf + ': ' + pct(v.irrPrior) }
-    };
-    P.holdings.forEach(function (h) {
-      s[h.id] = { kind: 'model', short: h.cell.split('!')[1], title: m.file + ' › ' + h.cell, detail: h.name + ' fair value ' + money(h.current) + ' (' + P.period.prior.split(' ')[0] + ' ' + money(h.prior) + ', ' + signed((h.current / h.prior - 1) * 100) + '%)' };
-    });
-    P.recording.lines.forEach(function (l) {
-      s[l.id] = { kind: 'voice', short: l.id, title: 'Voice explanation, ' + P.people.partner.name + ', ' + l.t, detail: l.text };
-    });
-    return s;
-  }
-
-  /* ---------- small components ---------- */
-
-  var ICON = {
-    model: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1.5" width="10" height="9" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M1 4.6h10M4.6 1.5v9" stroke="currentColor" stroke-width="1.1"/></svg>',
-    voice: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 5v2M4 3.5v5M6 2v8M8 3.5v5M10 5v2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
-    prior: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M6 3.4V6l1.8 1.2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
-    check: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.3l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    arrow: '<svg viewBox="0 0 16 10" aria-hidden="true"><path d="M1 5h13M10 1.5L14 5l-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    lock: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="5.2" width="7" height="5.3" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M4 5.2V3.8a2 2 0 0 1 4 0v1.4" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
-    flag: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 10.5V1.8M3 2h6l-1.4 2.2L9 6.4H3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>'
-  };
 
   function chip(kind, why) {
     var l = LEGEND[kind];
-    var title = why ? l.label + ': ' + why : l.label + ': ' + l.note;
-    return '<span class="chip chip-' + kind + '" data-legend="' + kind + '" title="' + esc(title) + '" aria-label="' + esc(title) + '"><i></i>' + l.label + '</span>';
+    var title = l.label + ': ' + (why || l.note);
+    return '<span class="chip chip-' + kind + '" data-legend="' + kind + '" title="' + esc(title) + '"><i></i>' + l.label + '</span>';
   }
-  function cite(id, srcs) {
-    var s = srcs[id];
-    return '<span class="cite cite-' + s.kind + '" title="' + esc(s.title + ': ' + s.detail) + '">' + ICON[s.kind] + esc(s.short) + '</span>';
+  function shortLabel(id) {
+    var s = S[id];
+    if (s.kind === 'excel') return s.cell;
+    if (s.kind === 'pdf') return 'p.' + s.page;
+    if (s.kind === 'voice') return id + ' ' + mmss(s.t);
+    if (s.kind === 'web') return 'Web';
+    return 'Q2 letter';
   }
-  function avatar(person, cls) {
-    return '<span class="avatar ' + (cls || '') + '" title="' + esc(person.name + ', ' + person.role) + '">' + esc(person.initials) + '</span>';
+  function sourceTitle(id) {
+    var s = S[id], f = fileById(s.file);
+    if (s.kind === 'excel') return f.name + ' › ' + s.sheet + '!' + s.cell;
+    if (s.kind === 'pdf') return f.name + ', page ' + s.page;
+    if (s.kind === 'voice') return f.name + ', ' + mmss(s.t);
+    return f.name;
   }
-  function panel(o) {
-    return '<section class="panel ' + (o.cls || '') + '" data-element="' + o.id + '">' +
-      '<header class="panel-head"><div class="panel-titles">' +
-      (o.kicker ? '<div class="kicker">' + o.kicker + '</div>' : '') +
-      '<h3>' + o.title + '</h3></div>' + chip(o.legend, o.why) + '</header>' +
-      '<div class="panel-body">' + o.body + '</div></section>';
+  function cite(id) {
+    var s = S[id];
+    return '<button type="button" class="cite cite-' + s.kind + (state.sel === id ? ' is-active' : '') + '" data-cite="' + id + '" title="' + esc(sourceTitle(id)) + '" aria-pressed="' + (state.sel === id) + '">' + ICON[s.kind] + esc(shortLabel(id)) + '</button>';
   }
-  function frame(kind, state, caption) {
-    var html = kind === 'deck' ? deckHTML(state) : kind === 'excel' ? excelHTML(state) : letterHTML(state);
-    var scrollRegion = kind === 'excel' && state === 'approved' ? ' tabindex="0" role="region" aria-label="Excel schedule; scroll horizontally for more columns"' : '';
-    return '<div class="doc-frame doc-frame-' + kind + '" data-doc="' + kind + '"' + scrollRegion + '>' + html + '</div>';
+  function tag(id, text) {
+    return '<button type="button" class="tag' + (state.sel === id ? ' is-active' : '') + '" data-cite="' + id + '" title="' + esc('Data tag: ' + sourceTitle(id)) + '">' + esc(text) + '</button>';
   }
-
-  /* ---------- documents ---------- */
-
-  function bridgeSVG() {
-    var v = focusVehicle();
-    var W = 500, H = 236, top = 26, bottom = 182;
-    var bars = [{ label: P.period.prior.split(' ')[0] + ' NAV', value: v.navPrior, total: true }]
-      .concat(P.bridge.map(function (b) { return { label: b.label, value: b.value }; }))
-      .concat([{ label: P.period.label.split(' ')[0] + ' NAV', value: v.nav, total: true }]);
-    var cum = v.navPrior, levels = [v.navPrior];
-    P.bridge.forEach(function (b) { cum += b.value; levels.push(cum); });
-    var mn = Math.min.apply(null, levels.concat([v.nav])), mx = Math.max.apply(null, levels.concat([v.nav]));
-    var span = mx - mn;
-    var lo = Math.floor((mn - span * 0.7) / 5) * 5, hi = Math.ceil((mx + span * 0.2) / 5) * 5;
-    function y(val) { return top + (hi - val) / (hi - lo) * (bottom - top); }
-    var slot = (W - 20) / bars.length, bw = slot * 0.5;
-    var out = '<svg class="bridge" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="NAV bridge">';
-    out += '<line x1="10" x2="' + (W - 10) + '" y1="' + bottom + '" y2="' + bottom + '" class="axis"/>';
-    var run = v.navPrior;
-    bars.forEach(function (b, i) {
-      var x = 10 + slot * i + (slot - bw) / 2;
-      var y1, y2, cls, lbl;
-      if (b.total) { y1 = y(b.value); y2 = bottom; cls = 'bar-total'; lbl = num(b.value); }
-      else {
-        var from = run, to = run + b.value;
-        y1 = y(Math.max(from, to)); y2 = y(Math.min(from, to));
-        cls = b.value < 0 ? 'bar-neg' : 'bar-pos'; lbl = signed(b.value);
-        run = to;
-      }
-      out += '<rect x="' + x.toFixed(1) + '" y="' + y1.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(1.5, y2 - y1).toFixed(1) + '" class="' + cls + '"/>';
-      out += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (y1 - 6).toFixed(1) + '" class="bar-val">' + lbl + '</text>';
-      if (i < bars.length - 1) {
-        var level = b.total && i === 0 ? b.value : run;
-        out += '<line x1="' + (x + bw).toFixed(1) + '" x2="' + (x + slot).toFixed(1) + '" y1="' + y(level).toFixed(1) + '" y2="' + y(level).toFixed(1) + '" class="connector"/>';
-      }
-      var lines = splitLabel(b.label);
-      lines.forEach(function (ln, j) {
-        out += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (bottom + 16 + j * 13) + '" class="bar-lbl">' + esc(ln) + '</text>';
-      });
-    });
-    out += '<path d="M14 ' + (bottom - 9) + 'l6 -4M14 ' + (bottom - 4) + 'l6 -4" class="break"/>';
-    out += '</svg>';
-    return out;
-  }
-  function splitLabel(label) {
-    var w = label.split(' ');
-    if (w.length < 2 || label.length <= 11) return [label];
-    var best = null;
-    for (var i = 1; i < w.length; i++) {
-      var a = w.slice(0, i).join(' '), b = w.slice(i).join(' ');
-      var score = Math.max(a.length, b.length);
-      if (!best || score < best.score) best = { score: score, lines: [a, b] };
-    }
-    return best.lines;
+  function sentenceHTML(c) {
+    var body = esc(c.text).replace(/\{tag:([A-Z0-9]+)\|([^}]+)\}/g, function (m, id, t) { return tag(id, t); });
+    var on = state.drawer === c.id;
+    return '<span class="sent' + (on ? ' is-traced' : '') + '" data-claim="' + c.id + '">' + body + '<span class="cites">' + c.cites.map(cite).join('') + '</span></span> ';
   }
 
-  function pendingCommentary() {
-    var v = focusVehicle(), d = derive(v);
-    return v.short + ' commentary pending. Net IRR changed ' + bps(d.dBps) + '; explanation requested from ' + P.people.partner.name + '.';
+  function status(id) {
+    if (id === 'W1' && !state.approved) return { k: 'review', t: 'Needs review', d: 'Market context from one trade-press source. A reviewer confirms it before approval.' };
+    if (id === 'W1') return { k: 'ok', t: 'Verified', d: 'Confirmed by ' + P.people.ir.name + ' as market context.' };
+    if (id === 'D1' || id === 'T3') return { k: 'ok', t: 'Verified', d: 'Conflict resolved ' + P.edit.when + ': the draft said “' + P.letter[3].draft + '”, which this source does not support. ' + P.edit.reviewer + ' corrected it (' + P.edit.type.toLowerCase() + ').' };
+    if (id === 'M1') return { k: 'ok', t: 'Verified', d: 'Recomputed from the cited range: ' + (xirr(cashRows()) * 100).toFixed(2) + '%, matching registry value ' + F.irr.toFixed(1) + '%.' };
+    if (id === 'M3') return { k: 'ok', t: 'Verified', d: '118.0 × (1 − 8.0%) = ' + (118 * 0.92).toFixed(2) + ', reported as $108.6M.' };
+    return { k: 'ok', t: 'Verified', d: 'Each citing sentence was checked against this source.' };
   }
 
-  function deckHTML(state) {
-    var v = focusVehicle(), d = derive(v), ok = state === 'approved';
-    var q2 = P.period.prior.split(' ')[0];
-    function kpi(label, value, sub, extra, focus) {
-      return '<div class="deck-kpi' + (focus ? ' is-focus' : '') + (focus && ok ? ' is-updated' : '') + '">' +
-        '<div class="deck-kpi-label">' + label + '</div>' +
-        '<div class="deck-kpi-value">' + value + (focus && !ok ? '<span class="deck-unapproved">Unapproved</span>' : '') + '</div>' +
-        '<div class="deck-kpi-sub">' + sub + (extra ? ' <b>' + extra + '</b>' : '') + '</div></div>';
-    }
-    return '<div class="doc deck deck-' + P.brand.deckFont + '" style="--brand:' + P.brand.color + ';--brand-accent:' + P.brand.accent + '">' +
-      '<div class="deck-rule"></div>' +
-      '<div class="deck-top"><div><div class="deck-kicker">' + esc(v.short) + ' · ' + P.period.label + '</div>' +
-      '<div class="deck-title">Performance and value bridge</div></div>' +
-      '<div class="deck-logo"><b>' + P.brand.mark + '</b><span>' + P.brand.sub + '</span></div></div>' +
-      '<div class="deck-main"><div class="deck-kpis">' +
-      kpi('Net IRR', pct(v.irr), q2 + ' ' + pct(v.irrPrior), bps(d.dBps), true) +
-      kpi('Net TVPI', mult(d.tvpi), q2 + ' ' + mult(d.tvpiPrior)) +
-      kpi('DPI', mult(d.dpi), q2 + ' ' + mult(d.dpi)) +
-      kpi('Net asset value', money(v.nav), q2 + ' ' + money(v.navPrior)) +
-      '</div><div class="deck-chart"><div class="deck-chart-title">NAV bridge, ' + P.period.prior + ' to ' + P.period.label + ' (USD millions)</div>' + bridgeSVG() + '</div></div>' +
-      '<div class="deck-commentary ' + (ok ? 'is-updated' : 'is-pending') + '"><div class="deck-commentary-label">Commentary</div>' +
-      '<p>' + esc(ok ? commentary('v2') : pendingCommentary()) + '</p></div>' +
-      '<div class="deck-foot"><span>Confidential. Prepared for the limited partners of ' + esc(v.name) + ' As of ' + P.period.asOf + '.</span><span>' + P.focus.deckSlide + '</span></div>' +
-      '</div>';
+  /* ---------- views ---------- */
+
+  var NAV = [['connections', 'Connections'], ['vault', 'Vault'], ['templates', 'Templates'], ['graph', 'Graph'], ['outputs', 'Outputs']];
+  function navKey() { return state.view === 'ingest' ? 'vault' : state.view === 'detail' ? 'outputs' : state.view; }
+  function sidebar() {
+    return '<div class="firm"><span class="avatar">MC</span><div><b>' + esc(P.firm) + '</b><span>Signed in · Sam Ortiz</span></div></div>' +
+      '<nav class="side-nav" aria-label="FinanceOS">' + NAV.map(function (it) {
+        var on = navKey() === it[0];
+        return '<button type="button" class="side-item' + (on ? ' on' : '') + '" data-view="' + it[0] + '"' + (on ? ' aria-current="page"' : '') + '>' + it[1] + '</button>';
+      }).join('') + '</nav>' +
+      '<div class="side-status"><div class="label">' + P.package.name + '</div><p><b>' + (state.approved ? 'Approved v3' : state.generated ? 'Ready for review' : 'In progress') + '</b></p></div>';
   }
-
-  function excelHTML(state) {
-    var ok = state === 'approved';
-    var focus = focusVehicle();
-    var cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'];
-    var head = ['Vehicle', 'Vintage', 'Commit.', 'Paid-in', 'Distrib.', 'NAV', 'Net TVPI', 'DPI', 'IRR ' + P.period.prior.split(' ')[0], 'IRR ' + P.period.label.split(' ')[0], 'Chg (bps)'];
-    var rows = '';
-    function cell(content, cls) { return '<td class="' + (cls || '') + '">' + content + '</td>'; }
-    function rowHead(n) { return '<th class="rn">' + n + '</th>'; }
-    function blank(n) { var s = ''; for (var i = 0; i < n; i++) s += '<td></td>'; return s; }
-    rows += '<tr>' + rowHead(1) + cell('<b>Fund performance summary</b>', 'span-text') + blank(10) + '</tr>';
-    rows += '<tr>' + rowHead(2) + cell('As of ' + P.period.asOf + '. USD millions, net of fees and carry.', 'muted span-text') + blank(10) + '</tr>';
-    rows += '<tr>' + rowHead(3) + blank(11) + '</tr>';
-    rows += '<tr class="hdr">' + rowHead(4) + head.map(function (h, i) { return cell(h, i === 0 ? '' : 'r'); }).join('') + '</tr>';
-    var t = { c: 0, p: 0, d: 0, n: 0 };
-    P.vehicles.forEach(function (v, i) {
-      var d = derive(v), isF = v.id === focus.id;
-      t.c += v.commitments; t.p += v.paidIn; t.d += v.distributions; t.n += v.nav;
-      var irrCls = 'r' + (isF ? (ok ? ' sel is-updated' : ' sel pending') : '');
-      rows += '<tr>' + rowHead(5 + i) +
-        cell(esc(v.short) + (isF ? ' <sup>(1)</sup>' : '')) + cell(v.vintage, 'r') + cell(num(v.commitments), 'r') + cell(num(v.paidIn), 'r') +
-        cell(num(v.distributions), 'r') + cell(num(v.nav), 'r') + cell(mult(d.tvpi), 'r') + cell(mult(d.dpi), 'r') +
-        cell(pct(v.irrPrior), 'r') + cell(pct(v.irr), irrCls) + cell(signed(d.dBps, 0), 'r' + (Math.abs(d.dBps) >= P.focus.rule.irrBps ? ' neg' : '')) + '</tr>';
-    });
-    var tr = 5 + P.vehicles.length;
-    rows += '<tr class="tot">' + rowHead(tr) + cell('Total') + cell('') + cell(num(t.c), 'r') + cell(num(t.p), 'r') + cell(num(t.d), 'r') + cell(num(t.n), 'r') + blank(5) + '</tr>';
-    rows += '<tr>' + rowHead(tr + 1) + blank(11) + '</tr>';
-    rows += '<tr class="note">' + rowHead(tr + 2) + '<td colspan="11" class="' + (ok ? 'is-updated' : 'pending-note') + '"><span class="note-k">(1) ' + esc(focus.short) + ':</span> ' + esc(ok ? commentary('v2') : pendingCommentary()) + '</td></tr>';
-    for (var extra = tr + 3; extra <= 26; extra++) rows += '<tr>' + rowHead(extra) + blank(11) + '</tr>';
-    var formula = '=REGISTRY("' + P.focus.registryId + '", "' + P.period.label.replace(/(Q\d) (\d{4})/, '$2$1') + '")';
-    return '<div class="doc excel">' +
-      '<div class="xl-title"><span class="xl-icon">X</span><span>' + esc(workbookFile()) + '</span><span class="xl-state ' + (ok ? 'ok' : 'draft') + '">' + (ok ? 'Approved v3' : 'Draft') + '</span></div>' +
-      '<div class="xl-formula"><span class="xl-ref">' + excelCell() + '</span><span class="xl-fx">fx</span><span class="xl-f">' + esc(formula) + '</span></div>' +
-      '<div class="xl-sheet"><table class="xl-grid"><thead><tr><th class="corner rn"></th>' + cols.map(function (c) { return '<th>' + c + '</th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<div class="xl-tabs">' + P.package.workbookTabs.map(function (t, i) { return '<span' + (i === 0 ? ' class="on"' : '') + '>' + esc(t) + '</span>'; }).join('') + '</div>' +
-      '</div>';
+  function head(kicker, title, chips) {
+    return '<header class="view-head"><div><div class="label">' + kicker + '</div><h2>' + title + '</h2></div><div class="head-chips">' + chips + '</div></header>';
   }
+  function allFiles() { return P.vault.reduce(function (a, g) { return a.concat(g.files.map(function (f) { f.type = g.type; return f; })); }, []); }
 
-  function letterHTML(state) {
-    var ok = state === 'approved';
-    var v = focusVehicle(), d = derive(v);
-    var body = '<h4>' + esc(v.short) + '</h4>' +
-      '<p class="' + (ok ? 'is-updated' : 'pending-para') + '">' + esc(ok ? commentary('v2') : pendingCommentary()) + '</p>' +
-      '<p>During the quarter, ' + esc(v.short) + ' made no new investments and called no capital. Distributions since inception total ' + moneyLong(v.distributions) + ' (' + mult(d.dpi) + ' paid-in capital), and net asset value was ' + moneyLong(v.nav) + ' at ' + P.period.asOf + ', for a net TVPI of ' + mult(d.tvpi) + '.</p>';
-    otherVehicles().forEach(function (o) {
-      var od = derive(o);
-      body += '<h4>' + esc(o.short) + '</h4><p>' + esc(o.short) + ' net IRR was ' + pct(o.irr) + ' at ' + P.period.asOfShort + ', compared with ' + pct(o.irrPrior) + ' at ' + P.period.priorAsOf + '. ' +
-        (o.distributions > 0
-          ? 'Distributions since inception total ' + moneyLong(o.distributions) + ', or ' + mult(od.dpi) + ' paid-in capital, and net TVPI was ' + mult(od.tvpi) + '.'
-          : 'Net TVPI was ' + mult(od.tvpi) + '; the vehicle has not yet made distributions.') + '</p>';
-    });
-    return '<div class="doc letter" style="--brand:' + P.brand.color + '">' +
-      '<div class="letter-head"><span class="letter-mark">' + esc(P.firm) + '</span><span>Letter to Limited Partners · ' + P.period.quarterWord + '</span></div>' +
-      '<div class="letter-body">' + body + '</div>' +
-      '<div class="letter-foot"><span>Confidential</span><span>Page ' + P.focus.letterPage + '</span></div>' +
-      '</div>';
-  }
-
-  /* ---------- steps ---------- */
-
-  function story(n) {
-    var v = focusVehicle(), d = derive(v), pp = P.people;
-    var wc = words(commentary('v1'));
-    return [
-      { title: P.package.name, sub: 'Three outputs built from one set of figures. One change needs an explanation before anything goes to limited partners.' },
-      { title: 'The prior-period diff finds what changed', sub: v.short + ' net IRR fell from ' + pct(v.irrPrior) + ' to ' + pct(v.irr) + ', past the ' + P.focus.rule.irrBps + ' bps rule. The chip links the figure to the exact model cell.' },
-      { title: 'The partner explains it out loud', sub: pp.partner.name + ' answers in ' + P.recording.duration + ' of voice instead of writing prose. The transcript is split into lines that can be cited.' },
-      { title: 'A cited draft in two minutes', sub: 'A ' + wc + '-word commentary block drafted from the model and the transcript. Every claim links to its sources and is checked on its own.' },
-      { title: 'The reviewer’s edit becomes a typed signal', sub: pp.ir.name + ' corrects one sentence. The edit is logged as a factual correction, not a tone change, so it counts as a real error.' },
-      { title: 'Approve once, update everywhere', sub: pp.cfo.name + ' approves. The figure and the commentary update the LP deck, the Excel schedule and the letter together.' },
-      { title: 'Audit trail, and what stays the same for every customer', sub: 'Who changed what, when and why, by version. Swap in a different prospect and only the configuration changes.' }
-    ][n];
-  }
-
-  function step0() {
-    var v = focusVehicle(), d = derive(v), pp = P.people, s = sources(), V = P.vault;
-    var groupChip = { 'Excel': chip('today', 'Excel-based agents read the workbooks'), 'Voice notes': chip('today', 'Voice interview capture') };
-    var pending = { name: 'Partner interview: ' + v.short + ' net IRR, ' + pp.partner.name, synced: 'Requested ' + P.request.sentOn + ', not yet recorded', claims: 0, pending: true };
-    var groups = V.sources.map(function (g) {
-      var files = g.files.concat(g.type === 'Voice notes' ? [pending] : []);
-      return '<li class="vg"><div class="vg-head"><b>' + esc(g.type) + '</b><span>' + files.length + '</span>' + (groupChip[g.type] || '') + '</div><ul>' +
-        files.map(function (f) {
-          return '<li class="vf' + (f.pending ? ' is-pending' : '') + '"><span class="vf-name">' + esc(f.name) + '</span><span class="vf-meta">' + esc(f.synced) + '</span><span class="vf-use">' + (f.pending ? 'Pending' : 'Used in ' + f.claims + ' claims') + '</span></li>';
-        }).join('') + '</ul></li>';
-    }).join('');
-    var nFiles = V.sources.reduce(function (a, g) { return a + g.files.length; }, 0);
-    var vault = panel({ id: 'vault', legend: 'proposed', why: 'Source vault kept in sync: Excel, PDF, web snapshots, transcripts', kicker: 'Sources · ' + P.period.label, title: nFiles + ' files, 1 requested', cls: 'panel-vault',
-      body: '<ul class="vault">' + groups + '</ul>' });
-
-    var cfg = {};
-    P.config.forEach(function (k) { cfg[k.k] = k.v; });
-    var total = 0, verified = 0, explain = 0;
-    var STATUS = { 'Approved': 'ok', 'Verified': 'ok', 'Draft': 'draft', 'Needs explanation': 'flag' };
-    var rows = V.sections.map(function (x, i) {
-      total += x.total; verified += x.verified;
-      var isF = x.status === 'Needs explanation';
-      if (isF) explain += 1;
-      return '<li class="sec' + (isF ? ' is-focus' : '') + '"><span class="sec-n">' + (i + 1) + '</span><span class="sec-name">' + esc(x.name) + '</span>' +
-        '<span class="sec-st st-' + STATUS[x.status] + '">' + x.status + '</span><span class="sec-count">' + x.verified + ' of ' + x.total + ' verified</span>' +
-        '<span class="sec-bar"><i style="width:' + (100 * x.verified / x.total).toFixed(1) + '%"></i></span></li>';
-    }).join('');
-    var conflicts = total - verified - explain;
-    var outline = panel({ id: 'outline', legend: 'proposed', why: 'Report outline with section status, assembled from the configured template', kicker: 'Report builder · configured template', title: 'LP report outline', cls: 'panel-outline',
-      body: '<ol class="outline">' + rows + '</ol>' });
-    var flag = panel({ id: 'flag', legend: 'proposed', why: 'Prior-period diff with an explanation rule', kicker: 'Needs explanation', title: esc(v.short) + ' · ' + P.focus.metric, cls: 'panel-flag',
-      body: '<div class="flag-figs"><span class="was">' + pct(v.irrPrior) + '</span>' + ICON.arrow + '<span class="now">' + pct(v.irr) + '</span><span class="delta">' + bps(d.dBps) + '</span></div>' +
-        '<p>Over the ' + P.focus.rule.irrBps + ' bps rule. Explanation requested from ' + esc(pp.partner.name) + '.</p>' +
-        '<div class="cite-row">' + cite('M1', s) + cite('P1', s) + '</div>' });
-
-    var verify = panel({ id: 'verify', legend: 'proposed', why: 'Every claim checked against its source', kicker: 'Verification', title: total + ' claims checked against sources', cls: 'panel-verify',
-      body: '<div class="reg-bar ver-bar"><span style="flex:' + verified + '"></span><b style="flex:' + conflicts + '"></b><i></i></div>' +
-        '<dl class="reg-stats"><div><dt>Verified</dt><dd>' + verified + '</dd></div><div><dt>Conflicts</dt><dd class="neg">' + conflicts + '</dd></div><div><dt>Needs explanation</dt><dd class="amber">' + explain + '</dd></div></dl>' });
-    var places = [
-      ['LP deck', 'Slide ' + P.focus.deckSlide + ', performance table'],
-      ['Excel schedule', scheduleSheet() + '!' + excelCell()],
-      ['LP letter', 'Page ' + P.focus.letterPage + ', ' + v.short + ' paragraph']
+  function connectionsView() {
+    var conns = [
+      ['Google Drive', 'Meridian › Fund II, Portfolio', 'Connected Sep 2, 2026 · last sync Oct 16, 6:00 PM', '214 files watched'],
+      ['SharePoint data room', 'Northwind sale process', 'Connected Sep 14, 2026 · last sync Oct 16, 5:45 PM', '38 files watched'],
+      ['Voice capture', 'Partner interviews', 'Requests sent from FinanceOS · last recording Oct 21', '1 recording this quarter']
     ];
-    var tag = panel({ id: 'datatag', legend: 'proposed', why: 'Data tag: one approved, versioned value per fact, linked to every place it appears', kicker: 'Data tag · ' + esc(P.focus.registryId), title: esc(v.short) + ' ' + P.focus.metric + ' · ' + pct(v.irr), cls: 'panel-tag',
-      body: '<ul class="places">' + places.map(function (p) { return '<li><b>' + p[0] + '</b><span>' + esc(p[1]) + '</span><em>Linked</em></li>'; }).join('') + '</ul>' +
-        '<p class="foot muted">Appears in ' + places.length + ' places. Approving the figure updates all of them.</p>' });
-
-    var check = panel({ id: 'verify-assumption', legend: 'assumption', why: 'Reviewer behavior to validate in the pilot', kicker: 'To validate', title: 'Reviewers trust the source check',
-      body: '<p>A claim-level check against the vault replaces re-tying every figure by hand. Measure review hours in the pilot.</p>' });
-    var keys = ['Brand template', 'Metric definition', 'Approval chain', 'Audience variants'];
-    var config = panel({ id: 'config', legend: 'proposed', why: 'Customer configuration, no code', kicker: 'Configuration in effect', title: 'Configured for ' + esc(P.shortFirm), cls: 'panel-config',
-      body: '<dl class="b-kv cfg">' + keys.filter(function (k) { return cfg[k]; }).map(function (k) { return '<div><dt>' + esc(k) + '</dt><dd>' + esc(cfg[k]) + '</dd></div>'; }).join('') + '</dl>' });
-    var o = P.package.outputs;
-    var targets = [['LP deck', '.pptx', o.deckSlides + ' slides'], ['Excel schedule', '.xlsx', P.package.workbookTabs.length + ' tabs'], ['LP letter', '.docx', o.letterPages + ' pages']];
-    var exportsP = panel({ id: 'exports', legend: 'proposed', why: 'Export locked until approval', kicker: 'Export', title: 'Locked until ' + esc(pp.cfo.role) + ' approval', cls: 'panel-exports',
-      body: '<ul class="exports">' + targets.map(function (x) { return '<li><span class="lock" aria-hidden="true">' + ICON.lock + '</span><b>' + x[0] + '</b><span class="ext">' + x[1] + '</span><span>' + x[2] + '</span></li>'; }).join('') + '</ul>' +
-        '<div class="brand-out">' + chip('today', 'Brand-compliant output generation across Word, PPT and Excel') + '<span>Brand-compliant rendering to Word, PPT and Excel</span></div>' });
-
-    return '<div class="grid g0"><div class="col-vault">' + vault + '</div><div class="col-main">' + outline + flag + '</div>' +
-      '<div class="col-side">' + verify + tag + check + '</div><div class="col-side">' + config + exportsP + '</div></div>';
+    var engine = [
+      ['PDF', 'Parse page layout, tables and reading order; keep page coordinates for every passage', '46 pages', chip('proposed', 'PDF layout parsing')],
+      ['Excel', 'Read every cell, formula and named range; build the dependency graph', '13,686 cells', chip('today', 'Excel-based agents read the workbooks')],
+      ['Audio', 'Transcribe with word timestamps and speaker', '1:12, 186 words', chip('today', 'Voice interview capture')],
+      ['Web', 'Snapshot the page with its capture date and URL', '1 snapshot', chip('proposed', 'Dated web snapshots')]
+    ];
+    return '<section class="view" data-element="connections">' + head('Connections', 'Sources stay where the firm keeps them', chip('proposed', 'Connectors kept in sync')) +
+      '<div class="conn-grid">' + conns.map(function (c) { return '<article class="conn"><div class="conn-top"><b>' + c[0] + '</b><span class="st st-ok">' + ICON.check + 'Syncing</span></div><p>' + c[1] + '</p><p class="muted small">' + c[2] + '</p><p class="conn-count">' + c[3] + '</p></article>'; }).join('') + '</div>' +
+      '<section class="engine" data-element="engine"><header class="view-head small"><div><div class="label">Ingestion engine</div><h3>What happens to each file type</h3></div>' + chip('proposed', 'Ingestion engine') + '</header>' +
+      '<table class="tbl"><thead><tr><th>Type</th><th>What the engine does</th><th>This quarter</th><th>Status</th></tr></thead><tbody>' + engine.map(function (e) { return '<tr><td><b>' + e[0] + '</b></td><td>' + e[1] + '</td><td class="num">' + e[2] + '</td><td>' + e[3] + '</td></tr>'; }).join('') + '</tbody></table></section></section>';
   }
 
-  function step1() {
-    var v = focusVehicle(), d = derive(v), s = sources(), m = P.focus.model, rule = P.focus.rule;
-    function periodPane(prior) {
-      return '<article class="period-pane' + (prior ? '' : ' current') + '"' + (prior ? ' data-element="prior"' : '') + '>' +
-        '<div class="label">' + (prior ? P.period.prior + ' · ' + P.focus.prior.version : P.period.label + ' · Draft') + ' ' + chip('proposed') + '</div>' +
-        '<h2>' + esc(v.short) + ' performance</h2><div class="pane-metric">' + pct(prior ? v.irrPrior : v.irr) + (prior ? '' : cite('M1', s)) + '</div>' +
-        '<div class="pane-sub' + (prior ? '' : ' focus-line') + '">' + (prior ? 'Net IRR · approved by ' + esc(P.focus.prior.approvedBy) + ' on ' + P.focus.prior.approvedOn : bps(d.dBps) + ' · over the ' + rule.irrBps + ' bps explanation rule') + '</div>' +
-        '<div class="mini-statement"><div><span>Net asset value</span><b>' + money(prior ? v.navPrior : v.nav) + '</b></div>' +
-        '<div><span>Net TVPI</span><b>' + mult(prior ? d.tvpiPrior : d.tvpi) + '</b></div><div><span>DPI</span><b>' + mult(d.dpi) + '</b></div></div></article>';
-    }
-    var compare = '<section class="compare" data-element="diff">' + periodPane(true) + periodPane(false) + '</section>';
-    var source = '<aside class="inspector" data-element="source"><div class="label">Evidence inspector</div><h3>' + esc(m.sheet + '!' + m.cell) + '</h3>' +
-      '<div class="inspect-block"><b>' + esc(m.file) + '</b><span>' + esc(m.version) + '</span></div>' +
-      '<div class="inspect-block"><b>Formula</b><p>' + esc(m.formula) + '</p>' + chip('today', 'Source-linked citation chips; Excel-based agents read the model') + '</div>' +
-      '<div class="inspect-block" data-element="rule"><b>Configured rule</b><p>Net IRR ≥ ' + rule.irrBps + ' bps or NAV ≥ ' + rule.navPct + '% quarter over quarter.</p>' + chip('proposed', 'Explanation rule; thresholds are customer configuration') + '</div>' +
-      '<div class="explain-call">Explanation requested from ' + esc(P.people.partner.name) + '</div></aside>';
-    var rows = P.holdings.map(function (h) {
-      return '<tr><td>' + esc(h.name) + '</td><td>' + cite(h.id, s) + '</td><td class="r">' + money(h.prior) + '</td><td class="r">' + money(h.current) + '</td><td class="r neg">' + signed(h.current - h.prior).replace(MINUS, MINUS + '$').replace('+', '+$') + 'M</td></tr>';
-    }).join('');
-    var other = P.bridge[P.bridge.length - 1];
-    rows += '<tr><td>' + esc(other.label) + '</td><td>—</td><td></td><td></td><td class="r">' + signed(other.value).replace(MINUS, MINUS + '$').replace('+', '+$') + 'M</td></tr>';
-    var holdings = '<section class="desk-table" data-element="holdings"><header class="table-head"><div><div class="label">What moved inside ' + esc(v.short) + '</div><h3>Valuation model bridge</h3></div>' + chip('today', 'Excel-based agents read the model') + '</header>' +
-      '<div class="table-scroll" tabindex="0" role="region" aria-label="Valuation model bridge"><table><thead><tr><th>Holding</th><th>Source cell</th><th class="r">' + P.period.prior + '</th><th class="r">' + P.period.label + '</th><th class="r">Change</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>';
-    return '<div class="desk">' + compare + source + holdings + '</div>';
+  function vaultView() {
+    var q = [
+      ['Q3 2026', 'New · in progress', 'q3', '8 files synced · package not yet generated', 'st-review'],
+      ['Q2 2026', 'Generated and approved', 'q2', '4 outputs · approved by Priya Raman, Aug 7', 'st-ok'],
+      ['Q1 2026', 'Generated and approved', 'q1', '4 outputs · approved May 6', 'st-ok']
+    ];
+    return '<section class="view" data-element="quarters">' + head('Vault · Fund II', 'Quarters', chip('proposed', 'Source vault organised by reporting period')) +
+      '<div class="quarters">' + q.map(function (x) {
+        var open = x[2] === 'q3';
+        return '<button type="button" class="quarter' + (open ? ' is-new' : '') + '"' + (open ? ' data-view="ingest"' : ' disabled') + '><span class="folder" aria-hidden="true"></span><b>' + x[0] + '</b><span class="st ' + x[4] + '">' + x[1] + '</span><span class="muted">' + x[3] + '</span>' + (open ? '<span class="open">Open ' + ICON.arrow + '</span>' : '') + '</button>';
+      }).join('') + '</div></section>';
   }
 
-  function waveform() {
-    var seed = 0;
-    for (var i = 0; i < P.id.length; i++) seed = (seed * 31 + P.id.charCodeAt(i)) >>> 0;
-    function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
-    var n = 180, W = 1600, H = 96, bw = W / n;
-    var gapsAt = P.recording.lines.map(function (l) { var p = l.t.split(':'); return (parseInt(p[0], 10) * 60 + parseInt(p[1], 10)) / P.recording.seconds; });
-    var out = '<svg class="wave" viewBox="0 0 ' + W + ' ' + (H + 24) + '" preserveAspectRatio="none" role="img" aria-label="Recorded waveform">';
-    for (var k = 0; k < n; k++) {
-      var pos = k / n, quiet = gapsAt.some(function (g) { return Math.abs(pos - g) < 0.009; });
-      var amp = quiet ? 0.05 : 0.16 + 0.84 * Math.pow(rnd(), 1.35) * (0.62 + 0.38 * Math.sin(k / 6));
-      var h = Math.max(3, amp * H);
-      out += '<rect x="' + (k * bw + bw * 0.22).toFixed(1) + '" y="' + ((H - h) / 2 + 20).toFixed(1) + '" width="' + (bw * 0.56).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="2"/>';
-    }
-    P.recording.lines.forEach(function (l, j) {
-      var x = gapsAt[j] * W;
-      out += '<line x1="' + x.toFixed(1) + '" x2="' + x.toFixed(1) + '" y1="14" y2="' + (H + 22) + '" class="mark"/>';
+  function ingestView() {
+    var files = allFiles(), figs = files.reduce(function (s, f) { return s + f.figures; }, 0);
+    return '<section class="view" data-element="ingest">' + head('Vault › Q3 2026', files.length + ' files ingested, ' + figs + ' figures registered', chip('today', 'Excel-based agents; voice interview capture') + chip('proposed', 'Ingestion detail and figure registry')) +
+      '<table class="tbl ingest"><thead><tr><th>File</th><th>Source</th><th>Synced</th><th>Extracted</th><th class="num">Figures</th></tr></thead><tbody>' + files.map(function (f) {
+        var k = S[sourcesOfFile(f.id)[0]].kind;
+        return '<tr><td><button type="button" class="file-link" data-file="' + f.id + '"><span class="ficon">' + ICON[k] + '</span><span><b>' + esc(f.name) + '</b><em>' + esc(f.type) + '</em></span></button></td><td class="muted">' + esc(f.path) + '</td><td>' + esc(f.synced) + '</td><td>' + esc(f.extracted) + '</td><td class="num">' + f.figures + '</td></tr>';
+      }).join('') + '</tbody></table></section>';
+  }
+
+  function templatesView() {
+    var outs = [['LP letter', '.docx', '6 pages'], ['LP deck', '.pptx', '24 slides'], ['Performance schedules', '.xlsx', '4 tabs'], ['Capital account statements', '.pdf', 'one per LP']];
+    var vars = [['{Fund II Net IRR}', 'Valuation model › Summary!F18', 'M1'], ['{Fund II NAV}', 'Valuation model › Summary!F12', 'M4'], ['{Fund II Distributions}', 'Capital accounts › LP_Capital!D14', 'A1'], ['{Prior Net IRR}', 'Q2 2026 LP letter, approved v4', 'P1'], ['{Holding fair values}', 'Valuation model › Valuation!H8:H40', 'M3'], ['{Value change explanation}', 'Partner interview, requested when the rule fires', 'T1']];
+    var sections = ['Fund overview', 'Fund II performance', 'Portfolio updates', 'Valuation changes', 'Capital activity', 'Outlook'];
+    return '<section class="view" data-element="template">' + head('Templates · configured for ' + esc(P.shortFirm), 'Meridian LP package 2026', chip('proposed', 'Configured per customer, no code') + chip('today', 'Brand-compliant output across Word, PPT and Excel')) +
+      '<div class="tpl-outs">' + outs.map(function (o, i) { return '<div class="tpl-out' + (i === 0 ? ' on' : '') + '"><b>' + o[0] + '</b><span>' + o[1] + ' · ' + o[2] + '</span></div>'; }).join('') + '</div>' +
+      '<div class="tpl-grid"><div><div class="label">LP letter sections</div><ol class="tpl-sections">' + sections.map(function (s, i) { return '<li' + (i === 1 ? ' class="on"' : '') + '>' + s + '</li>'; }).join('') + '</ol></div>' +
+      '<div data-element="variables"><div class="label">Data tags and source bindings ' + chip('proposed', 'Figure registry bindings') + '</div><table class="tbl"><thead><tr><th>Tag</th><th>Bound to</th><th>Value</th></tr></thead><tbody>' + vars.map(function (v) { return '<tr><td><code>' + esc(v[0]) + '</code></td><td>' + esc(v[1]) + '</td><td>' + cite(v[2]) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+      '<div><div class="label">Rules</div><dl class="rules">' + P.config.map(function (k) { return '<div><dt>' + esc(k.k) + '</dt><dd>' + esc(k.v) + '</dd></div>'; }).join('') + '</dl></div></div></section>';
+  }
+
+  function graphView() {
+    var docs = [['model', 'Valuation model'], ['capital', 'Capital accounts'], ['northwind', 'Northwind board deck'], ['cobalt', 'Cobalt board deck'], ['covenant', 'Covenant amendment'], ['web', 'Web snapshot'], ['prior', 'Q2 LP letter'], ['voice', 'Partner interview']];
+    var figs = [['irr', 'Net IRR 11.8%'], ['chg', 'IRR change −240 bps'], ['nav', 'NAV $821.1M'], ['nw', 'Northwind $249.4M'], ['co', 'Cobalt $108.6M'], ['dist', 'Distributions $224.0M']];
+    var secs = [['perf', 'Fund II performance'], ['val', 'Valuation changes'], ['port', 'Portfolio updates'], ['cap', 'Capital activity']];
+    var edges = [['model', 'irr'], ['prior', 'chg'], ['model', 'chg'], ['voice', 'chg', 'warn'], ['model', 'nav'], ['capital', 'nav', 'bad'], ['model', 'nw'], ['northwind', 'nw'], ['model', 'co'], ['covenant', 'co'], ['cobalt', 'co'], ['capital', 'dist'], ['web', 'nw'],
+      ['irr', 'perf'], ['chg', 'perf'], ['nav', 'perf'], ['nav', 'cap'], ['nw', 'val'], ['co', 'val'], ['nw', 'port'], ['co', 'port'], ['dist', 'cap']];
+    var pos = {}, W = 1000, rowH = 52;
+    function col(list, x, top) { list.forEach(function (n, i) { pos[n[0]] = { x: x, y: top + i * rowH, label: n[1] }; }); }
+    col(docs, 10, 20); col(figs, 380, 72); col(secs, 750, 124);
+    var svg = '<svg class="graph" viewBox="0 0 ' + W + ' ' + (20 + docs.length * rowH) + '" role="img" aria-label="Document, figure and section graph">';
+    edges.forEach(function (e) {
+      var a = pos[e[0]], b = pos[e[1]], x1 = a.x + 230, y1 = a.y + 18, x2 = b.x, y2 = b.y + 18, mx = (x1 + x2) / 2;
+      svg += '<path class="edge ' + (e[2] || '') + '" d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '"/>';
     });
-    out += '</svg>';
-    var labels = P.recording.lines.map(function (l, j) {
-      return '<span class="wave-label" style="left:' + (gapsAt[j] * 100).toFixed(2) + '%">' + l.id + ' · ' + l.t + '</span>';
-    }).join('');
-    return '<div class="wave-box">' + out + '<div class="wave-labels">' + labels + '</div></div>';
+    Object.keys(pos).forEach(function (k) {
+      var n = pos[k], cls = k === 'nav' ? ' bad' : k === 'chg' ? ' warn' : docs.some(function (d) { return d[0] === k; }) ? ' doc' : secs.some(function (s) { return s[0] === k; }) ? ' sec' : ' fig';
+      svg += '<g class="node' + cls + '"><rect x="' + n.x + '" y="' + n.y + '" width="230" height="36" rx="2"/><text x="' + (n.x + 12) + '" y="' + (n.y + 23) + '">' + esc(n.label) + '</text></g>';
+    });
+    svg += '<text class="col-label" x="10" y="12">Vault documents</text><text class="col-label" x="380" y="64">Figures (registry)</text><text class="col-label" x="750" y="116">Template sections</text></svg>';
+    var issues = '<aside class="issues" data-element="discrepancy"><header class="view-head small"><div><div class="label">Flags</div><h3>2 flags, both resolved</h3></div>' + chip('proposed', 'Verification against the registry') + '</header>' +
+      '<article class="issue bad"><span class="st st-conflict">Seeded discrepancy</span><b>Fund II NAV disagrees</b><p>Valuation model ' + cite('M4') + ' $821.1M; fund-admin statement ' + cite('A2') + ' $830.5M. The administrator had not booked the $9.4M Cobalt markdown ' + cite('M3') + '.</p><p class="res"><b>Resolved.</b> The valuation model is the source of truth for NAV; note added for the administrator. Reviewer: Sam Ortiz, Oct 20.</p><p class="muted small">Planted in the sample data to show the check working.</p></article>' +
+      '<article class="issue warn"><span class="st st-review">Needs explanation</span><b>Net IRR 14.2% → 11.8%, −240 bps</b><p>Over the 100 bps rule ' + cite('M1') + ' ' + cite('P1') + '.</p><p class="res"><b>Resolved.</b> Dana Whitfield’s voice note explains it ' + cite('T1') + ' ' + cite('T3') + ', Oct 21.</p></article></aside>';
+    return '<section class="view" data-element="graph">' + head('Graph · ' + P.package.name, 'How evidence flows into the report', chip('proposed', 'Evidence graph across documents, figures and sections')) +
+      '<div class="graph-wrap">' + svg + issues + '</div></section>';
   }
 
-  function step2() {
-    var v = focusVehicle(), d = derive(v), pp = P.people;
-    var lines = P.recording.lines.map(function (l) {
-      return '<li><span class="cite cite-voice">' + ICON.voice + l.id + '</span><span class="t">' + l.t + '</span><p>' + esc(l.text) + '</p></li>';
-    }).join('');
-    var rec = panel({ id: 'recording', legend: 'today', why: 'Voice interview capture', kicker: 'Voice explanation', title: 'Why did ' + esc(v.short) + ' net IRR fall?', cls: 'panel-rec',
-      body: '<div class="speaker">' + avatar(pp.partner, 'lg') + '<div><b>' + esc(pp.partner.name) + '</b><span>' + esc(pp.partner.role) + ' · Recorded ' + P.recording.recordedOn + '</span></div><span class="dur">' + ICON.voice + P.recording.duration + '</span></div>' +
-        '<div class="wave-wrap">' + waveform() + '</div>' });
-    var trans = panel({ id: 'transcript', legend: 'today', why: 'Voice interview capture produces the transcript; line IDs are citation targets', kicker: 'Transcript', title: P.recording.lines.length + ' citable lines', cls: 'panel-transcript',
-      body: '<ol class="transcript">' + lines + '</ol>' });
-    var req = panel({ id: 'request', legend: 'proposed', why: 'Explanation request routed from the flagged figure', kicker: 'Explanation request', title: 'Sent to ' + esc(pp.partner.name),
-      body: '<div class="req-from">' + avatar(pp.ir) + '<span><b>' + esc(pp.ir.name) + '</b> · ' + esc(pp.ir.role) + ' · ' + P.request.sentOn + '</span></div>' +
-        '<div class="req-fig"><span>' + esc(v.short) + ' · Net IRR</span><b>' + pct(v.irrPrior) + ' → ' + pct(v.irr) + '</b><span class="neg">' + bps(d.dBps) + '</span></div>' +
-        '<div class="guide"><div class="kicker">Interview guide · ' + esc(P.request.guide) + '</div><ol>' + P.request.prompts.map(function (q) { return '<li>' + esc(q) + '</li>'; }).join('') + '</ol></div>' });
-    var asm = panel({ id: 'voice-assumption', legend: 'assumption', why: 'Behavior to validate in the pilot', kicker: 'To validate', title: 'Partners will talk, not type',
-      body: '<p>Assumes a partner will answer a short voice prompt every quarter. If not, the draft starts from prior-period text and the reviewer writes more.</p>' });
-    return '<div class="grid g2 hero-grid"><div class="row-hero">' + rec + '</div><div class="col-main">' + trans + '</div><div class="col-side">' + req + asm + '</div></div>';
-  }
-
-  function commentaryHTML(version, s, mode) {
-    return P.claims.map(function (c) {
-      var t;
-      if (mode === 'tracked' && c.edit) {
-        var parts = c.text.split('{edit}');
-        t = esc(parts[0]) + '<del>' + esc(c.edit.before) + '</del> <ins>' + esc(c.edit.after) + '</ins>' + esc(parts[1]);
-      } else {
-        t = esc(claimText(c, version));
-      }
-      var cls = 'claim';
-      return '<span class="' + cls + '" data-claim="' + c.id + '">' + t + '</span>' + c.cites.map(function (id) { return cite(id, s); }).join('');
-    }).join(' ');
-  }
-
-  function autoChecks(c) {
-    var out = [];
-    if (c.id === 'C1') out.push('Figure matches registry');
-    out.push('Citations resolve');
-    return out.map(function (x) { return '<span class="ac">' + ICON.check + x + '</span>'; }).join('');
-  }
-
-  function step3() {
-    var v = focusVehicle(), s = sources();
-    var text1 = commentary('v1');
-    var draft = panel({ id: 'draft', legend: 'today', why: 'Drafting through the DAG and citation chips exist today; the registry input is proposed', kicker: 'Commentary block · v1 draft', title: esc(v.short) + ' performance commentary', cls: 'panel-draft',
-      body: '<div class="prose">' + commentaryHTML('v1', s, 'plain') + '</div>' +
-        '<div class="meta-row"><span>' + words(text1) + ' words</span><span>' + P.claims.length + ' claims</span><span>' + P.claims.length + ' of ' + P.claims.length + ' cited</span><span>Drafted ' + P.timeline.drafted + ', two minutes after the recording</span><span>Goes to LP letter, deck slide ' + P.focus.deckSlide + ' and schedule note (1)</span></div>' });
-    var claimRows = P.claims.map(function (c) {
-      var ev = c.cites.map(function (id) { return '<span><b>' + esc(s[id].short) + '</b> ' + esc(s[id].detail) + '</span>'; }).join('');
-      return '<tr><td class="cid">' + c.id + '</td><td class="ctext">' + esc(claimText(c, 'v1')) + '<div class="evidence">' + ev + '</div></td><td class="srcs">' + c.cites.map(function (id) { return cite(id, s); }).join('') + '</td><td class="acs">' + autoChecks(c) + '</td><td><span class="pill pill-wait">Awaiting review</span></td></tr>';
-    }).join('');
-    var claims = panel({ id: 'claims', legend: 'proposed', why: 'The claim is the evaluation unit: one figure or statement, its sources and the reviewer’s disposition', kicker: 'Evaluation unit', title: 'Each claim is checked on its own', cls: 'panel-claims',
-      body: '<table class="claims"><thead><tr><th>ID</th><th>Claim</th><th>Sources</th><th>Automatic checks</th><th>Disposition</th></tr></thead><tbody>' + claimRows + '</tbody></table>' +
-        '<p class="foot muted">Numbers and citations can be checked automatically. Whether the wording is faithful to the source still needs a person.</p>' });
-    var inputs = ['Registry figure: ' + esc(v.short) + ' net IRR ' + pct(v.irr), 'Model cells ' + s.M1.short + ', ' + s.M2.short + ', ' + s.M3.short, 'Transcript T1–T' + P.recording.lines.length, P.period.prior + ' letter, for house style'];
-    var stepsDag = ['Extract claims from sources', 'Draft in house style, 60 words max', 'Attach a citation to every claim', 'Brand and tone check'];
-    var dag = panel({ id: 'dag', legend: 'today', why: 'Shared ML service orchestrating reasoning and generation through a DAG', kicker: 'Shared ML service', title: 'How the draft was assembled', cls: 'panel-dag',
-      body: '<div class="dag"><div class="dag-inputs">' + inputs.map(function (i, k) { return '<div class="node node-in">' + i + (k === 0 ? chip('proposed', 'The figure registry is proposed') : '') + '</div>'; }).join('') + '</div>' +
-        '<div class="dag-edge"></div>' +
-        stepsDag.map(function (st, i) { return '<div class="node node-step"><span>' + (i + 1) + '</span>' + st + '</div><div class="dag-edge"></div>'; }).join('') +
-        '<div class="node node-out">Commentary v1 · ' + P.claims.length + ' claims, all cited</div></div>' +
-        '<p class="foot muted">Drafting through the DAG exists today; the registry input is proposed.</p>' });
-    return '<div class="grid g3 hero-grid"><div class="row-hero">' + draft + '</div><div class="col-main">' + claims + '</div><div class="col-side">' + dag + '</div></div>';
-  }
-
-  function step4() {
-    var v = focusVehicle(), s = sources(), pp = P.people, c = editedClaim();
-    var tracked = panel({ id: 'tracked', legend: 'today', why: 'Content-level feedback already records accepted, edited, rejected and ignored', kicker: 'Commentary block · v2', title: 'One sentence corrected', cls: 'panel-tracked',
-      body: '<div class="editor-row">' + avatar(pp.ir) + '<span><b>' + esc(pp.ir.name) + '</b> · ' + esc(pp.ir.role) + ' · ' + P.timeline.edited + '</span><span class="pill pill-edit">Edited ' + c.id + '</span></div>' +
-        '<div class="prose">' + commentaryHTML('v2', s, 'tracked') + '</div>' });
-    var signal = panel({ id: 'signal', legend: 'proposed', why: 'Typed edit classification feeding the evaluation harness', kicker: 'Captured signal', title: 'Logged as a factual correction', cls: 'panel-signal',
-      body: '<div class="edit-types"><span class="et on">' + ICON.check + 'Factual correction</span><span class="et">Tone or style</span></div>' +
-        '<dl class="sig">' +
-        '<div><dt>Claim</dt><dd>' + c.id + ' · ' + esc(claimText(c, 'v2')) + '</dd></div>' +
-        '<div><dt>Label</dt><dd>' + esc(P.edit.label) + '</dd></div>' +
-        '<div><dt>Why</dt><dd>' + esc(P.edit.reason) + '</dd></div>' +
-        '<div><dt>Sources</dt><dd class="quotes">' + ['T3', 'T4'].map(function (id) { return '<span>' + cite(id, s) + ' “' + esc(s[id].detail) + '”</span>'; }).join('') + '</dd></div>' +
-        '<div><dt>Slice</dt><dd>' + esc(P.shortFirm) + ' · ' + esc(v.short) + ' commentary · Interview source · ' + P.period.label + '</dd></div>' +
-        '<div><dt>Effect</dt><dd>Counts toward the unsupported-claim rate before approval, and joins this cycle’s adjudication sample.</dd></div>' +
-        '</dl>' });
-    var accepted = P.claims.filter(function (x) { return !x.edit; }).map(function (x) { return x.id; });
-    var treat = [
-      ['Accepted without edit', 'Weak positive. Sample it.', accepted[0] + '–' + accepted[accepted.length - 1], ''],
-      ['Edited', 'Classify the edit first: factual or tone.', c.id + ', factual', 'on'],
-      ['Rejected or thumbs down', 'Strong but rare. Always adjudicate.', 'None', ''],
-      ['Silence', 'Unknown. Never counted as approval.', 'None', ''],
-      ['Corrected after approval', 'Most severe. Tracked by slice.', 'Watched after distribution', '']
-    ].map(function (r) { return '<tr class="' + r[3] + '"><td>' + r[0] + '</td><td>' + r[1] + '</td><td class="here">' + r[2] + '</td></tr>'; }).join('');
-    var table = panel({ id: 'signals', legend: 'proposed', why: 'Evaluation harness: signals are imperfect, so each is treated differently', kicker: 'Evaluation harness', title: 'How each signal is treated', cls: 'panel-treat',
-      body: '<table class="treat"><thead><tr><th>Signal</th><th>How it counts</th><th>This block</th></tr></thead><tbody>' + treat + '</tbody></table>' +
-        '<p class="foot muted">A person adjudicates about 50 claims per customer per cycle, stratified by section and source type.</p>' });
-    var asm = panel({ id: 'edit-assumption', legend: 'assumption', why: 'Reviewer behavior to validate', kicker: 'To validate', title: 'One click to confirm the edit type',
-      body: '<p>Assumes reviewers will confirm a pre-selected edit type. Without it, an edit cannot be counted as an error or as style.</p>' });
-    return '<div class="grid g4 hero-grid"><div class="row-hero">' + tracked + '</div><div class="col-main">' + signal + asm + '</div><div class="col-side">' + table + '</div></div>';
-  }
-
-  function step5() {
-    var pp = P.people, t = P.timeline;
-    var chain = [[pp.ir, 'Prepared', t.edited], [pp.partner, 'Signed off', t.signedOff], [pp.cfo, 'Approved', t.approved]].map(function (r) {
-      return '<div><b>' + esc(r[0].name) + ' · ' + esc(r[0].role) + '</b><span>' + r[1] + ' · ' + r[2] + '</span></div>';
-    }).join('');
-    var approval = '<section class="approval-rail" data-element="approval"><div class="rail-title">Approval · Commentary v3 ' + chip('proposed', 'Approval chain with version history') + '</div>' + chain + '</section>';
-    function docPanel(kind, name, where) {
-      return '<article class="doc-panel doc-panel-' + kind + '"><header class="doc-panel-head"><div><b>' + name + '</b><span>' + esc(where) + '</span></div>' + chip('today', 'Brand-compliant output generation across PPT, Excel and Word') + '</header>' + frame(kind, 'approved') + '</article>';
+  var STAGES = [['Ingest', '8 files parsed'], ['Index', '1,912 passages'], ['Register figures', P.package.figures + ' figures'], ['Draft from cited evidence', '214 claims'], ['Trace sentences', 'every sentence to its span'], ['Verify', '214 checked · 2 flags resolved'], ['Ready for review', '4 files']];
+  function outputsView() {
+    var done = state.generated ? STAGES.length : state.running;
+    var stages = '<ol class="progress">' + STAGES.map(function (s, i) {
+      var st = i < done ? 'done' : i === done ? 'run' : 'wait';
+      return '<li class="' + st + '"><span class="dotp">' + (i < done ? ICON.check : i + 1) + '</span><b>' + s[0] + '</b><em>' + (i < done ? s[1] : i === done ? 'Running' : 'Waiting') + '</em></li>';
+    }).join('') + '</ol>';
+    var files = [['LP letter', '.docx', '6 pages', '96 of 96 claims verified', 'letter'], ['LP deck', '.pptx', '24 slides', '61 of 61 claims verified', ''], ['Performance schedules', '.xlsx', '4 tabs · 186 figures from the registry', '33 of 33 note claims verified', ''], ['Capital account statements', '.pdf', '1 per LP · 38 figures from the registry', '24 of 24 claims verified', '']];
+    var out = '<section class="view" data-element="generate">' + head('Outputs · ' + P.package.name, state.generated ? 'Generated, ready for review' : 'Generate the Q3 package', chip('today', 'Shared ML service orchestrating through a DAG') + chip('proposed', 'Trace and verify stages')) +
+      '<div class="gen-row"><button type="button" class="btn primary" data-generate="1"' + (state.running >= 0 && !state.generated ? ' disabled' : '') + '>' + (state.generated ? 'Regenerate' : 'Generate') + '</button>' + stages + '</div>';
+    if (state.generated) {
+      out += '<div class="files" data-element="files">' + chip('today', 'Brand-compliant output across Word, PPT and Excel') + '<div class="file-cards">' + files.map(function (f) {
+        return '<button type="button" class="file-card"' + (f[4] ? ' data-view="detail"' : ' disabled') + '><b>' + f[0] + ' <em>' + f[1] + '</em></b><span>' + f[2] + '</span><span class="st st-ok">' + f[3] + '</span>' + (f[4] ? '<span class="open">Open ' + ICON.arrow + '</span>' : '') + '</button>';
+      }).join('') + '</div></div>' +
+        '<div class="consistency" data-element="consistency"><header class="view-head small"><div><div class="label">Consistency check</div><h3>The same figures everywhere</h3></div>' + chip('proposed', 'Render once from the registry') + '</header><table class="tbl"><thead><tr><th>Figure</th><th>Letter</th><th>Deck</th><th>Schedules</th><th>Statements</th></tr></thead><tbody>' +
+        [['Net IRR 11.8%', 'M1', 1, 1, 1, 0], ['NAV $821.1M', 'M4', 1, 1, 1, 1], ['Distributions $224.0M', 'A1', 1, 1, 1, 1], ['Net TVPI 1.45x', 'A1', 0, 1, 1, 0]].map(function (r) {
+          return '<tr><td>' + r[0] + ' ' + cite(r[1]) + '</td>' + r.slice(2).map(function (v) { return '<td>' + (v ? '<span class="ok">' + ICON.check + 'Match</span>' : '<span class="muted">Not shown</span>') + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div>';
     }
-    var docs = '<section class="document-desk" data-element="outputs-updated">' + docPanel('deck', 'LP deck', 'Slide ' + P.focus.deckSlide) + docPanel('excel', 'Excel schedule', scheduleSheet() + '!' + excelCell()) + docPanel('letter', 'LP letter', 'Page ' + P.focus.letterPage) + '</section>';
-    var consistency = '<section class="doc-consistency" data-element="consistency"><div><div class="label">Consistency check ' + chip('proposed', 'One approved number and one commentary version feed every output') + '</div><span class="muted">LP deck · Excel schedule · LP letter</span></div><b>3 of 3 outputs match the registry</b></section>';
-    return '<div class="approval-desk">' + approval + docs + consistency + '</div>';
+    return out + '</section>';
   }
 
-  function step6() {
-    var v = focusVehicle(), d = derive(v), pp = P.people, t = P.timeline, c = editedClaim();
-    var sys = { name: 'System', role: 'Registry', initials: '·' };
-    var ml = { name: 'Shared ML service', role: 'Drafting', initials: 'AI' };
-    var events = [
-      [t.dataClose, sys, 'Data close. ' + esc(P.focus.model.file) + ' locked.', ''],
-      [t.flagged, sys, esc(v.short) + ' net IRR flagged: ' + pct(v.irrPrior) + ' → ' + pct(v.irr) + ', ' + bps(d.dBps) + '.', 'Rule ' + P.focus.rule.irrBps + ' bps'],
-      [P.request.sentOn, pp.ir, 'Explanation requested from ' + esc(pp.partner.name) + '.', ''],
-      [P.recording.recordedOn, pp.partner, 'Voice explanation recorded, ' + P.recording.duration + '.', 'T1–T' + P.recording.lines.length],
-      [t.drafted, ml, 'Commentary drafted: ' + P.claims.length + ' claims, all cited.', 'v1'],
-      [t.edited, pp.ir, c.id + ' corrected: “' + esc(c.edit.before) + '” → “' + esc(c.edit.after) + '”.', 'v2 · factual'],
-      [t.signedOff, pp.partner, 'Commentary signed off.', ''],
-      [t.approved, pp.cfo, 'Approved and rendered to deck, schedule and letter.', 'v3 · 3 of 3']
-    ].map(function (e) {
-      return '<li><span class="when">' + e[0] + '</span>' + avatar(e[1], e[1] === sys || e[1] === ml ? 'sys' : '') + '<span class="what"><b>' + esc(e[1].name) + '</b> ' + e[2] + '</span>' + (e[3] ? '<span class="tag">' + e[3] + '</span>' : '') + '</li>';
-    }).join('');
-    var audit = panel({ id: 'audit', legend: 'proposed', why: 'Audit trail across the report cycle', kicker: esc(v.short) + ' net IRR · ' + P.period.label, title: 'Audit trail', cls: 'panel-audit',
-      body: '<ol class="audit">' + events + '</ol>' });
-    var parts = c.text.split('{edit}');
-    var versions = panel({ id: 'versions', legend: 'proposed', why: 'Version history with diffs', kicker: 'Commentary block', title: 'Version history', cls: 'panel-versions',
-      body: '<ol class="versions">' +
-        '<li><span class="vtag">v1</span><div><b>Drafted</b> · Shared ML service · ' + t.drafted + '</div></li>' +
-        '<li><span class="vtag">v2</span><div><b>Edited</b> · ' + esc(pp.ir.name) + ' · ' + t.edited + '<p class="vdiff">…' + esc(parts[0].trim().split(' ').slice(-5).join(' ')) + ' <del>' + esc(c.edit.before) + '</del> <ins>' + esc(c.edit.after) + '</ins>' + esc(parts[1]) + '</p></div></li>' +
-        '<li><span class="vtag on">v3</span><div><b>Approved</b> · ' + esc(pp.cfo.name) + ' · ' + t.approved + '<p class="muted">No text change. Approval locked the figure and the commentary, then rendered 3 outputs.</p></div></li>' +
-        '</ol>' });
-
-    function li(items) { return '<ul>' + items.map(function (i) { return '<li>' + i + '</li>'; }).join('') + '</ul>'; }
-    function item(text, kind) { return '<span class="b-item">' + text + '</span>' + chip(kind); }
-    var blocks = '<div class="b-sub" data-element="b-blocks"><div class="b-head"><b>Shared building blocks</b>' + chip('proposed', 'Built once by Brain Co. and used in every engagement') + '<span>Every segment, built once</span></div>' +
-      '<ul class="b-list">' +
-      '<li>' + item('Source vault (Excel, PDF, web snapshots, transcripts) kept in sync', 'proposed') + '</li>' +
-      '<li>' + item('Figure registry: one approved, versioned value per fact', 'proposed') + '</li>' +
-      '<li>' + item('Source-linked citations', 'today') + '</li>' +
-      '<li>' + item('Voice interview capture', 'today') + '</li>' +
-      '<li>' + item('Brand-compliant output across Word, PPT and Excel', 'today') + '</li>' +
-      '<li>' + item('Review and approval with version history', 'proposed') + '</li>' +
-      '<li>' + item('Feedback capture', 'today') + '</li>' +
-      '<li>' + item('Evaluation harness', 'proposed') + '</li>' +
-      '</ul></div>';
-    var product = '<div class="b-sub" data-element="b-product"><div class="b-head"><b>Investor-reporting product</b>' + chip('proposed', 'First product, built on the building blocks') + '<span>Private equity and real estate</span></div>' +
-      '<ul class="b-list">' +
-      '<li>' + item('Report object model: fund or vehicle, asset, period, metric, commentary block, source', 'proposed') + '</li>' +
-      '<li>' + item('Prior-period diff with the explain-the-change rule', 'proposed') + '</li>' +
-      '<li>' + item('LP package templates rendered once to deck, Excel and letter, with a consistency check', 'proposed') + '</li>' +
-      '</ul></div>';
-    
-    var configured = '<div class="b-col b-config" data-element="b-config"><div class="b-head"><b>Configured for ' + esc(P.shortFirm) + '</b>' + chip('proposed', 'Customer configuration') + '<span>Per customer, by the deployment team, no code</span></div>' +
-      '<dl class="b-kv">' + P.config.map(function (k) { return '<div><dt>' + esc(k.k) + '</dt><dd>' + esc(k.v) + '</dd></div>'; }).join('') + '</dl></div>';
-    var bespoke = '<div class="b-col" data-element="b-bespoke"><div class="b-head"><b>Bespoke services</b>' + chip('proposed', 'Outside the object model') + '<span>Priced separately: one-off analyses, unusual data connectors, non-recurring report types</span></div>' +
-      li(P.bespoke.map(esc)) + '</div>';
-    var declined = '<div class="b-declined" data-element="b-later"><div class="b-head"><b>Not this year</b>' + chip('proposed', 'A proposed decision, not a product part: work that would fragment the product') + '<span>Hospitality still gets the shared building blocks through deployment work.</span></div>' +
-      '<ul class="tags quiet"><li>A hospitality product</li><li>All enterprise reporting</li><li>A general workflow platform</li><li>Per-customer forks</li><li>Real-time dashboards</li><li>Self-serve template builder</li><li>External LP portal</li></ul></div>';
-    var test = '<div class="b-test" data-element="b-test">' + chip('assumption', 'Assumes a pipeline across all three segments; thresholds are provisional') + '<p>Assumes a pipeline across all three segments; with only these three customers, build nothing shared and keep working out go-to-market. A retrospective on two past quarters must reach about 75% of content from configuration before one paid single-quarter pilot. Under about 60%, stop the product; the building blocks stay. Thresholds are provisional.</p></div>';
-    var overlay = '<aside class="overlay" data-element="boundary"><header class="overlay-head"><div><div class="kicker">Product boundary</div><h3>Shared building blocks, one product on top, the rest configured</h3></div>' + chip('proposed', 'Shared building blocks, investor-reporting product, customer configuration, bespoke') + '</header>' +
-      '<div class="b-grid"><div class="b-col b-stack">' + blocks + product + test + '</div><div class="b-stack b-side">' + configured + bespoke + declined + '</div></div>' + '</aside>';
-    return '<div class="grid g6"><div class="col-main dimmed">' + audit + versions + '</div>' + overlay + '</div>';
+  function letterDoc() {
+    var fundII = P.letter.slice(0, 6), capital = P.letter.slice(6);
+    return '<article class="paper letter-paper" data-doc="letter"><header class="paper-head"><span class="paper-mark">' + esc(P.firm) + '</span><span>Letter to Limited Partners · ' + P.period.quarterWord + '</span></header>' +
+      '<h4>' + esc(F.short) + '</h4><p>' + fundII.map(sentenceHTML).join('') + '</p><p>' + capital.map(sentenceHTML).join('') + '</p>' +
+      '<footer class="paper-foot"><span>Confidential</span><span>Page 2</span></footer></article>';
   }
 
-  var BUILDERS = [step0, step1, step2, step3, step4, step5, step6];
+  function detailView() {
+    var approval = '<div class="approval" data-element="approval"><span class="st ' + (state.approved ? 'st-ok' : 'st-review') + '">' + (state.approved ? 'Approved v3' : 'In review v2') + '</span>' +
+      '<span>' + esc(P.people.ir.name) + ' prepared · ' + esc(P.people.partner.name) + ' signed off · ' + (state.approved ? esc(P.people.cfo.name) + ' approved ' + P.timeline.approved : esc(P.people.cfo.name) + ' to approve') + '</span>' +
+      (state.approved ? '' : '<button type="button" class="btn" data-approve="1">Approve as CFO</button>') +
+      '<button type="button" class="btn ghost" data-history="1">Version history</button><button type="button" class="btn ghost" data-drawer="BOUNDARY">Product boundary</button>' + chip('proposed', 'Approval chain with version history') + '</div>';
+    var hist = state.history ? '<ol class="versions"><li><b>v1</b> Drafted by the shared ML service · ' + P.timeline.drafted + '</li><li><b>v2</b> ' + esc(P.edit.reviewer) + ' corrected C4 (factual) · ' + P.timeline.edited + '</li><li><b>v3</b> ' + (state.approved ? 'Approved by ' + esc(P.people.cfo.name) + ' · ' + P.timeline.approved : 'Awaiting CFO approval') + '</li></ol>' : '';
+    return '<section class="view view-detail" data-element="letter">' + head('Outputs › LP letter.docx', esc(F.short) + ' performance', chip('today', 'Source-linked citation chips')) + approval + hist +
+      '<p class="hint">Click any sentence or figure to see its sources.</p><div class="doc-wrap">' + letterDoc() + '</div></section>';
+  }
+
+  function boundaryHTML() {
+    function item(text, kind) { return '<li><span>' + text + '</span>' + chip(kind) + '</li>'; }
+    return '<section class="boundary" data-element="boundary"><header class="view-head small"><div><div class="label">Product boundary</div><h3>Shared building blocks, one product on top, the rest configured</h3></div>' + chip('proposed', 'Proposed product boundary') + '</header>' +
+      '<div class="b-block"><b>Shared building blocks</b><span class="muted">Every segment, built once</span><ul>' +
+      item('Source vault kept in sync', 'proposed') + item('Figure registry', 'proposed') + item('Source-linked citations', 'today') + item('Voice interview capture', 'today') +
+      item('Brand-compliant output across Word, PPT and Excel', 'today') + item('Review and approval with version history', 'proposed') + item('Feedback capture', 'today') + item('Evaluation harness', 'proposed') + '</ul></div>' +
+      '<div class="b-block"><b>Investor-reporting product</b><span class="muted">Private equity and real estate</span><ul>' +
+      item('Report object model: fund, asset, period, metric, commentary, source', 'proposed') + item('Prior-period diff with the explain-the-change rule', 'proposed') + item('LP package templates rendered once to letter, deck, schedules and statements', 'proposed') + '</ul></div>' +
+      '<div class="b-block"><b>Configured for ' + esc(P.shortFirm) + '</b><span class="muted">Per customer, no code</span><dl>' + P.config.map(function (k) { return '<div><dt>' + esc(k.k) + '</dt><dd>' + esc(k.v) + '</dd></div>'; }).join('') + '</dl></div>' +
+      '<div class="b-block"><b>Bespoke services</b><span class="muted">Priced separately</span><ul class="plain">' + P.bespoke.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul></div>' +
+      '<div class="b-block"><b>Not this year</b><p class="muted">A hospitality product · all enterprise reporting · a general workflow platform · per-customer forks · real-time dashboards · self-serve template builder · external LP portal</p></div>' +
+      '<div class="b-banner">' + chip('assumption', 'Pipeline assumption; thresholds are provisional') + '<p>Assumes a pipeline across all three segments; with only these three customers, build nothing shared and keep working out go-to-market. A retrospective on two past quarters must reach about 75% of content from configuration before one paid pilot; under about 60%, stop the product. Thresholds are provisional.</p></div></section>';
+  }
+
+  /* ---------- source viewer ---------- */
+
+  function citedBy(id) {
+    var cl = claimsCiting([id]);
+    return '<div class="in-block"><div class="label">Cited by</div>' + (cl.length ? '<ol class="in-claims">' + cl.map(function (c) { return '<li><span class="in-cid">' + c.id + '</span><span>' + esc(plain(c)) + '</span></li>'; }).join('') + '</ol>' : '<p class="muted">No sentence in this section cites it.</p>') + '</div>';
+  }
+  function statusBlock(id) {
+    var st = status(id);
+    return '<div class="in-block in-status"><span class="st st-' + st.k + '">' + st.t + '</span><p>' + esc(st.d) + '</p></div>';
+  }
+  function srcHead(id, kindLabel) {
+    var f = fileById(S[id].file);
+    return '<header class="in-head"><div class="label">Source viewer · ' + kindLabel + '</div><h3>' + esc(f.name) + '</h3><button type="button" class="in-link" data-view="ingest">Show in Q3 vault</button></header>';
+  }
+
+  function waveform(at) {
+    var bars = '';
+    for (var i = 0; i < 120; i++) {
+      var tSec = i / 120 * AUDIO_SECONDS;
+      var speaking = [[4, 13.4], [19, 25.4], [41, 48.3], [58, 62.2]].some(function (r) { return tSec >= r[0] && tSec <= r[1]; });
+      var h = speaking ? 6 + Math.abs(Math.sin(i * 1.7) * 14 + Math.sin(i * 0.43) * 8) : 2;
+      bars += '<rect x="' + (i * 3) + '" y="' + (24 - h / 2).toFixed(1) + '" width="2" height="' + h.toFixed(1) + '"/>';
+    }
+    var x = (at / AUDIO_SECONDS * 360).toFixed(1);
+    return '<svg class="wave" viewBox="0 0 360 48" role="img" aria-label="Waveform, marker at ' + mmss(at) + '">' + bars + '<line x1="' + x + '" x2="' + x + '" y1="0" y2="48" class="wave-mark"/></svg>';
+  }
+  function voiceViewer(id) {
+    var s = S[id];
+    var lines = Object.keys(S).filter(function (k) { return S[k].kind === 'voice'; });
+    return '<section class="viewer viewer-voice" data-element="viewer-voice">' + srcHead(id, 'Voice') + chip('today', 'Voice interview capture') +
+      '<div class="in-block"><div class="player"><audio controls preload="none" src="' + AUDIO + '" aria-label="Sample audio of the partner interview"></audio><button type="button" class="btn" data-seek="' + s.t + '">' + ICON.play + 'Play from ' + mmss(s.t) + '</button></div>' + waveform(s.t) +
+      '<p class="muted small">Sample audio: synthetic voice made for this demo. Pauses stand in for unquoted parts of the 1:12 interview.</p></div>' +
+      '<div class="in-block"><div class="label">Transcript · word timestamps</div><ol class="transcript">' + lines.map(function (k) {
+        return '<li class="' + (k === id ? 'on' : '') + '"><button type="button" data-cite="' + k + '"><b>' + k + '</b>' + mmss(S[k].t) + '</button><p>' + esc(S[k].text) + '</p></li>';
+      }).join('') + '</ol></div>' + statusBlock(id) + citedBy(id) + '</section>';
+  }
+  function pdfViewer(id) {
+    var s = S[id];
+    return '<section class="viewer viewer-pdf" data-element="viewer-pdf">' + srcHead(id, 'PDF') + chip('proposed', 'PDF layout parsing with passage highlight') +
+      '<div class="pdf-page"><div class="pdf-meta"><span>' + esc(fileById(s.file).name) + '</span><span>Page ' + s.page + ' of ' + s.of + '</span></div><h4>' + esc(s.heading) + '</h4><p>' + esc(s.before) + '<mark>' + esc(s.quote) + '</mark>' + esc(s.after) + '</p></div>' +
+      statusBlock(id) + citedBy(id) + '</section>';
+  }
+  function excelViewer(id) {
+    var s = S[id];
+    var out = '<section class="viewer viewer-excel" data-element="viewer-excel">' + srcHead(id, 'Excel') + chip('today', 'Excel-based agents read the model') +
+      '<div class="xl-formula"><span class="xl-ref">' + s.sheet + '!' + s.cell + '</span><span class="xl-fx">fx</span><span class="xl-f">' + esc(s.formula) + '</span></div>';
+    if (id === 'M1') {
+      var rows = cashRows();
+      out += '<div class="xl-scroll" tabindex="0" role="region" aria-label="CF_Net precedent cells"><table class="xl-grid prec"><thead><tr><th class="rn"></th><th>A</th><th>B</th><th>C</th></tr></thead><tbody>' +
+        '<tr><th class="rn">4</th><td><b>Flow</b></td><td><b>Date</b></td><td class="r"><b>USD M</b></td></tr>' +
+        rows.map(function (r, i) { return '<tr class="is-prec"><th class="rn">' + (5 + i) + '</th><td>' + esc(r[2]) + '</td><td>' + r[0] + '</td><td class="r">' + (r[1] < 0 ? MINUS + Math.abs(r[1]).toFixed(1) : r[1].toFixed(1)) + '</td></tr>'; }).join('') +
+        '<tr class="is-cell"><th class="rn">F18</th><td colspan="2">Summary!F18, Net IRR</td><td class="r"><b>' + F.irr.toFixed(1) + '%</b></td></tr></tbody></table></div>' +
+        '<p class="muted small">Precedents: CF_Net!B5:C23, 18 LP cash flows plus the September 30 NAV ' + cite('M4') + ' as terminal value.</p>' +
+        '<div class="in-block calc"><div class="label">How this number was calculated</div><pre><code>' + esc(
+          'flows = read_range("CF_Net!B5:C23")   # 19 rows\n' +
+          '# (2021-06-30, -45.1) ... (2026-09-30, 821.1)\n\n' +
+          'def xnpv(rate, flows):\n' +
+          '    t0 = flows[0][0]\n' +
+          '    return sum(v / (1 + rate) ** ((d - t0).days / 365)\n' +
+          '               for d, v in flows)\n\n' +
+          'lo, hi = -0.9, 1.0          # bisection on XNPV = 0\n' +
+          'for _ in range(100):\n' +
+          '    mid = (lo + hi) / 2\n' +
+          '    lo, hi = (mid, hi) if xnpv(mid, flows) > 0 else (lo, mid)\n\n' +
+          'print(f"{mid:.2%}")          # ' + (xirr(rows) * 100).toFixed(2) + '%') + '</code></pre>' +
+        '<p class="calc-result">' + ICON.check + 'Recomputed in this page: <b>' + (xirr(rows) * 100).toFixed(2) + '%</b>, reported as ' + tag('M1', F.irr.toFixed(1) + '%') + '. Q2 reported ' + F.irrPrior.toFixed(1) + '% ' + cite('P1') + '; change ' + MINUS + Math.round((F.irrPrior - F.irr) * 100) + ' bps.</p></div>';
+    } else {
+      out += '<table class="xl-grid single"><tbody><tr class="is-cell"><th class="rn">' + s.cell + '</th><td>' + esc(s.label) + '</td><td class="r"><b>' + esc(s.value) + '</b></td></tr>' + (s.prior ? '<tr><th class="rn"></th><td>Prior quarter</td><td class="r">' + esc(s.prior) + '</td></tr>' : '') + '</tbody></table>' +
+        (s.note ? '<p class="small">' + esc(s.note) + '</p>' : '');
+    }
+    return out + statusBlock(id) + citedBy(id) + '</section>';
+  }
+  function excerptViewer(id) {
+    var s = S[id], web = s.kind === 'web';
+    return '<section class="viewer viewer-' + s.kind + '" data-element="viewer-' + s.kind + '">' + srcHead(id, web ? 'Web snapshot' : 'Prior report') + chip('proposed', web ? 'Dated web snapshots in the vault' : 'Prior-period reports in the vault') +
+      '<div class="pdf-page"><div class="pdf-meta"><span>' + (web ? esc(s.url) : 'Page ' + s.page) + '</span><span>' + (web ? 'Captured ' + esc(s.captured) : esc(s.approved)) + '</span></div><p><mark>' + esc(s.quote) + '</mark></p></div>' +
+      statusBlock(id) + citedBy(id) + '</section>';
+  }
+  /* ---------- drawer ---------- */
+
+  function passage(id) {
+    var s = S[id];
+    if (s.kind === 'voice') return s.text;
+    if (s.kind === 'excel') return s.label + ': ' + s.value;
+    return s.quote;
+  }
+  function claimById(id) { return P.letter.filter(function (c) { return c.id === id; })[0]; }
+  function tabsFor(c) {
+    var kinds = c.cites.map(function (id) { return S[id].kind; }), t = [];
+    if (kinds.indexOf('voice') >= 0) t.push(['voice', 'Voice clip']);
+    if (kinds.indexOf('excel') >= 0) t.push(['analysis', 'Analysis']);
+    t.push(['text', 'Text build']);
+    if (kinds.indexOf('pdf') >= 0) t.push(['pdf', 'PDF']);
+    if (kinds.indexOf('web') >= 0 || kinds.indexOf('letter') >= 0) t.push(['source', 'Source']);
+    return t;
+  }
+  var TAB_KIND = { voice: ['voice'], analysis: ['excel'], pdf: ['pdf'], source: ['web', 'letter'] };
+  function tabOfKind(k) { return k === 'voice' ? 'voice' : k === 'excel' ? 'analysis' : k === 'pdf' ? 'pdf' : 'source'; }
+  function pick(c, tab) {
+    if (state.sel && c.cites.indexOf(state.sel) >= 0 && TAB_KIND[tab].indexOf(S[state.sel].kind) >= 0) return state.sel;
+    return c.cites.filter(function (id) { return TAB_KIND[tab].indexOf(S[id].kind) >= 0; })[0];
+  }
+  function sourceView(id) {
+    var k = S[id].kind;
+    if (k === 'voice') return voiceViewer(id);
+    if (k === 'pdf') return pdfViewer(id);
+    if (k === 'excel') return excelViewer(id);
+    return excerptViewer(id);
+  }
+  function textBuild(c) {
+    var edited = c.id === P.edit.claimId;
+    var draft = edited ? plain(c).replace(c.final, c.draft) : plain(c);
+    return '<section class="viewer" data-element="text-build">' + chip('today', 'Content-level feedback capture') + chip('proposed', 'Typed edits and approval with version history') +
+      '<ol class="build"><li><div class="label">1 · Retrieved passages</div><ul>' + c.cites.map(function (id) { return '<li>' + cite(id) + ' ' + esc(passage(id)) + '</li>'; }).join('') + '</ul></li>' +
+      '<li><div class="label">2 · Draft v1 · shared ML service · ' + P.timeline.drafted + '</div><p>' + esc(draft) + '</p></li>' +
+      (edited ? '<li><div class="label">3 · Reviewer edit v2 · ' + esc(P.edit.reviewer) + ' · ' + P.edit.when + '</div><p><del>' + esc(c.draft) + '</del> <ins>' + esc(c.final) + '</ins></p><p><span class="st st-ok">' + esc(P.edit.type) + '</span> <span class="st">Tone or style</span></p><p class="small">' + esc(P.edit.reason) + '</p></li>'
+        : '<li><div class="label">3 · Review · ' + esc(P.people.ir.name) + '</div><p>Accepted without edit.</p></li>') +
+      '<li><div class="label">4 · Approval</div><p>' + (state.approved ? 'Approved v3 by ' + esc(P.people.cfo.name) + ', ' + P.timeline.approved : 'Signed off by ' + esc(P.people.partner.name) + '; awaiting CFO approval.') + '</p></li></ol></section>';
+  }
+  function drawerHTML() {
+    var close = '<button type="button" class="drawer-close" data-close="1" aria-label="Close">×</button>';
+    if (state.drawer === 'BOUNDARY') return close + boundaryHTML();
+    if (state.drawer.indexOf('S:') === 0) return close + sourceView(state.drawer.slice(2));
+    var c = claimById(state.drawer), tabs = tabsFor(c);
+    var tab = tabs.some(function (t) { return t[0] === state.tab; }) ? state.tab : tabs[0][0];
+    var body = tab === 'text' ? textBuild(c) : sourceView(pick(c, tab));
+    return close + '<header class="drawer-head" data-element="drawer"><div class="label">Sentence ' + c.id + ' · ' + c.cites.length + ' citations</div><p>' + esc(plain(c)) + '</p>' + chip('today', 'Source-linked citation chips') + '</header>' +
+      '<div class="drawer-tabs" role="tablist">' + tabs.map(function (t) { return '<button type="button" role="tab" class="dtab' + (t[0] === tab ? ' on' : '') + '" aria-selected="' + (t[0] === tab) + '" data-dtab="' + t[0] + '">' + t[1] + '</button>'; }).join('') + '</div>' + body;
+  }
 
   /* ---------- shell ---------- */
 
-  function topbar() {
-    return '<div class="brand"><i class="brand-mark" aria-hidden="true"></i><span>Brain Co.</span></div>' +
-      '<div class="crumb">FinanceOS / ' + esc(P.firm) + ' / <b>' + esc(P.package.name) + '</b></div>' +
-      '<div class="top-actions"><span class="period" id="top-step"></span><span class="sample" data-marker="sample">Sample data - fictional</span></div>';
-  }
-
-  function legendKey() {
-    return '<div class="legend-key" aria-label="Legend">' + ['today', 'proposed', 'assumption'].map(function (k) { return chip(k); }).join('') + '</div>';
-  }
-
-  function nav() {
-    var pros = Object.keys(DATA.prospects).map(function (id) {
-      var p = DATA.prospects[id];
-      return '<button type="button" class="seg' + (id === prospectId ? ' on' : '') + '" data-prospect="' + id + '">' + esc(p.shortFirm) + '<span>' + esc(p.strategy) + '</span></button>';
-    }).join('');
-    var dots = STEP_LABELS.map(function (l, i) {
-      return '<button type="button" class="dot" data-goto="' + i + '" aria-label="Step ' + i + ': ' + l + '"><span>' + i + '</span><em>' + l + '</em></button>';
-    }).join('');
-    return '<div class="nav-prospect" role="group" aria-label="Prospect">' + pros + '</div>' +
-      '<div class="nav-steps"><button type="button" class="arrow" data-nav="prev" aria-label="Previous step">' + ICON.arrow + '</button><div class="dots">' + dots + '</div><button type="button" class="arrow" data-nav="next" aria-label="Next step">' + ICON.arrow + '</button></div>' +
-      '<div class="nav-hint">← → keys</div>';
+  function mainView() {
+    return ({ connections: connectionsView, vault: vaultView, ingest: ingestView, templates: templatesView, graph: graphView, outputs: outputsView, detail: detailView }[state.view] || connectionsView)();
   }
 
   function render() {
-    P = DATA.prospects[prospectId];
-    document.title = 'Explain the change · ' + P.firm + ' (sample data)';
-    document.getElementById('topbar').innerHTML = topbar();
-    document.getElementById('legend').innerHTML = legendKey();
-    var stage = document.getElementById('stage');
-    stage.innerHTML = BUILDERS.map(function (b, i) {
-      return '<section class="step" data-step-panel="' + i + '" hidden>' + b() + '</section>';
-    }).join('');
-    document.getElementById('demo-nav').innerHTML = capture ? '' : nav();
-    document.body.dataset.prospect = prospectId;
+    document.getElementById('sidebar').innerHTML = sidebar();
+    document.getElementById('main').innerHTML = mainView();
+    var dr = document.getElementById('drawer');
+    dr.hidden = !state.drawer;
+    dr.innerHTML = state.drawer ? drawerHTML() : '';
+    document.getElementById('shell').classList.toggle('has-drawer', !!state.drawer);
+    var x = dr.querySelector('.xl-scroll');
+    if (x) { var c = x.querySelector('.is-cell'); if (c) x.scrollTop = c.offsetTop - x.clientHeight + c.offsetHeight + 8; }
   }
 
-  function fitDocs(root) {
-    var frames = (root || document).querySelectorAll('.doc-frame');
-    for (var i = 0; i < frames.length; i++) {
-      var f = frames[i], doc = f.firstElementChild;
-      if (!doc || !f.clientWidth) continue;
-      // Keep the approved capture composition when the figures fit. Otherwise
-      // use the readable sheet width, including in narrow desktop panes.
-      if (f.closest('.document-desk')) {
-        doc.style.zoom = '';
-        if (f.dataset.doc === 'excel') {
-          f.classList.remove('is-scrollable');
-          var numbers = doc.querySelectorAll('tbody tr:not(.hdr) td.r');
-          var needsScroll = window.innerWidth <= 900;
-          for (var j = 0; j < numbers.length; j++) {
-            if (numbers[j].scrollWidth > numbers[j].clientWidth) needsScroll = true;
-          }
-          f.classList.toggle('is-scrollable', needsScroll);
-          f.scrollLeft = 0;
-          var selected = doc.querySelector('td.sel');
-          if (needsScroll && selected) {
-            var cell = selected.getBoundingClientRect();
-            f.scrollLeft = cell.left - f.getBoundingClientRect().left - (f.clientWidth - cell.width) / 2;
-          }
-        }
-        continue;
-      }
-      if (!doc.dataset.natW) {
-        doc.style.zoom = '';
-        doc.dataset.natW = String(doc.offsetWidth);
-      }
-      doc.style.zoom = (f.clientWidth / +doc.dataset.natW).toFixed(4);
-    }
+  function tourNav() {
+    var dots = TOUR.map(function (t, i) { return '<button type="button" class="dot" data-goto="' + i + '" aria-label="Step ' + i + ': ' + t.label + '"><span>' + i + '</span><em>' + t.label + '</em></button>'; }).join('');
+    return '<div class="nav-steps"><button type="button" class="arrow" data-nav="prev" aria-label="Previous">' + ICON.arrow + '</button><div class="dots">' + dots + '</div><button type="button" class="arrow" data-nav="next" aria-label="Next">' + ICON.arrow + '</button></div><div class="nav-hint">Demo track · ← → keys · or click anything</div>';
   }
 
-  function updateStory() {
-    var s = story(current);
-    document.getElementById('story-step').textContent = current === 0 ? 'Overview' : 'Step ' + current + ' of ' + (STEP_COUNT - 1) + ' · ' + STEP_LABELS[current];
-    document.getElementById('top-step').textContent = current === 0 ? 'Overview' : 'Step ' + current + ' of ' + (STEP_COUNT - 1);
-    document.getElementById('story-title').textContent = s.title;
-    document.getElementById('story-sub').textContent = s.sub;
+  function updateCaption() {
+    var t = TOUR[current];
+    document.getElementById('story-step').textContent = current + ' of ' + (STEP_COUNT - 1) + ' · ' + t.label;
+    document.getElementById('story-title').textContent = t.title;
+    document.getElementById('story-sub').textContent = t.sub;
     var dots = document.querySelectorAll('[data-goto]');
     for (var i = 0; i < dots.length; i++) {
       var on = +dots[i].dataset.goto === current;
       dots[i].classList.toggle('on', on);
-      dots[i].classList.toggle('done', +dots[i].dataset.goto < current);
       if (on) dots[i].setAttribute('aria-current', 'step'); else dots[i].removeAttribute('aria-current');
     }
     var prev = document.querySelector('[data-nav="prev"]'), next = document.querySelector('[data-nav="next"]');
@@ -671,39 +440,18 @@
   }
 
   function syncUrl() {
-    try {
-      var u = new URL(window.location.href);
-      u.searchParams.set('step', String(current));
-      u.searchParams.set('prospect', prospectId);
-      window.history.replaceState(null, '', u.toString());
-    } catch (e) { /* file:// in some browsers refuses replaceState; the URL is only a convenience */ }
+    try { var u = new URL(window.location.href); u.searchParams.set('step', String(current)); window.history.replaceState(null, '', u.toString()); } catch (e) { /* file:// may refuse */ }
   }
 
-  function goTo(n, opts) {
-    var target = clampStep(n);
-    var animate = !(opts && opts.instant);
-    current = target;
-    document.body.dataset.step = String(current);
-    document.body.dataset.settled = 'false';
+  function settle(animate) {
     var token = ++settleToken;
-    var panels = document.querySelectorAll('[data-step-panel]');
-    var active = null;
-    for (var i = 0; i < panels.length; i++) {
-      var on = +panels[i].dataset.stepPanel === current;
-      panels[i].hidden = !on;
-      panels[i].classList.remove('is-entering');
-      if (on) active = panels[i];
-    }
-    fitDocs(active);
-    if (animate && active) {
-      void active.offsetWidth;
-      active.classList.add('is-entering');
-    }
-    updateStory();
-    syncUrl();
+    document.body.dataset.settled = 'false';
+    var shell = document.getElementById('shell');
+    shell.classList.remove('is-entering');
+    if (animate) { void shell.offsetWidth; shell.classList.add('is-entering'); }
     settlePromise = new Promise(function (resolve) {
       requestAnimationFrame(function () {
-        var anims = active && active.getAnimations ? active.getAnimations({ subtree: true }) : [];
+        var anims = shell.getAnimations ? shell.getAnimations({ subtree: true }) : [];
         Promise.all(anims.map(function (a) { return a.finished.catch(function () {}); })).then(function () {
           if (token === settleToken) document.body.dataset.settled = 'true';
           resolve();
@@ -713,51 +461,100 @@
     return settlePromise;
   }
 
-  function setProspect(id) {
-    if (!DATA.prospects[id] || id === prospectId) return goTo(current);
-    prospectId = id;
+  var genTimer = null;
+  function goTo(n, opts) {
+    clearInterval(genTimer);
+    current = clampStep(n);
+    var t = TOUR[current];
+    state.view = t.view;
+    state.drawer = t.drawer || null;
+    state.tab = t.tab || null;
+    state.sel = t.drawer === 'C1' ? 'M1' : null;
+    state.generated = current >= 5;
+    state.running = -1;
+    state.approved = false;
+    state.history = false;
+    document.body.dataset.step = String(current);
     render();
-    return goTo(current, { instant: true });
+    updateCaption();
+    syncUrl();
+    return settle(!(opts && opts.instant));
+  }
+
+  function generate() {
+    clearInterval(genTimer);
+    state.generated = false;
+    state.running = 0;
+    render();
+    genTimer = setInterval(function () {
+      state.running += 1;
+      if (state.running >= STAGES.length) { clearInterval(genTimer); state.generated = true; state.running = -1; }
+      render();
+    }, 280);
+  }
+
+  function openSentence(id, tab) {
+    state.drawer = id;
+    state.tab = tab || null;
+    render();
   }
 
   function bind() {
-    document.addEventListener('keydown', function (e) {
-      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(current + 1); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(current - 1); }
-    });
-    document.getElementById('demo-nav').addEventListener('click', function (e) {
+    document.addEventListener('click', function (e) {
       var b = e.target.closest('button');
+      var sent = e.target.closest('.sent');
+      if (!b && sent) { state.sel = null; openSentence(sent.dataset.claim); return; }
       if (!b) return;
-      if (b.dataset.goto !== undefined) goTo(+b.dataset.goto);
+      if (b.dataset.cite) {
+        state.sel = b.dataset.cite;
+        var inSent = b.closest('.sent');
+        if (inSent) openSentence(inSent.dataset.claim, tabOfKind(S[b.dataset.cite].kind));
+        else if (b.closest('#drawer') && state.drawer && state.drawer.indexOf('S:') !== 0 && state.drawer !== 'BOUNDARY' && claimById(state.drawer).cites.indexOf(b.dataset.cite) >= 0) openSentence(state.drawer, tabOfKind(S[b.dataset.cite].kind));
+        else { state.drawer = 'S:' + b.dataset.cite; render(); }
+      }
+      else if (b.dataset.file) { state.drawer = 'S:' + sourcesOfFile(b.dataset.file)[0]; render(); }
+      else if (b.dataset.view) { state.view = b.dataset.view; if (state.view !== 'detail') state.drawer = null; render(); }
+      else if (b.dataset.dtab) { state.tab = b.dataset.dtab; render(); }
+      else if (b.dataset.drawer) { state.drawer = b.dataset.drawer; render(); }
+      else if (b.dataset.close) { state.drawer = null; render(); }
+      else if (b.dataset.generate) generate();
+      else if (b.dataset.history) { state.history = !state.history; render(); }
+      else if (b.dataset.approve) { state.approved = true; render(); }
+      else if (b.dataset.seek !== undefined) {
+        var a = document.querySelector('#drawer audio');
+        if (a) { a.preload = 'auto'; a.currentTime = +b.dataset.seek; a.play().catch(function () {}); }
+      }
+      else if (b.dataset.goto !== undefined) goTo(+b.dataset.goto);
       else if (b.dataset.nav === 'prev') goTo(current - 1);
       else if (b.dataset.nav === 'next') goTo(current + 1);
-      else if (b.dataset.prospect) setProspect(b.dataset.prospect);
     });
-    var pending = 0;
-    window.addEventListener('resize', function () {
-      cancelAnimationFrame(pending);
-      pending = requestAnimationFrame(function () { fitDocs(document.querySelector('[data-step-panel]:not([hidden])')); });
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.target && /^(AUDIO|INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(current + 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(current - 1); }
+      else if (e.key === 'Escape' && state.drawer) { state.drawer = null; render(); }
     });
   }
 
+  document.title = 'FinanceOS · ' + P.firm + ' (sample data)';
+  document.getElementById('topbar').innerHTML = '<div class="brand"><i class="brand-mark" aria-hidden="true"></i><span>Brain Co.</span><span class="product">FinanceOS</span></div>' +
+    '<div class="crumb">' + esc(P.firm) + ' / <b>' + esc(P.package.name) + '</b></div>' +
+    '<div class="top-actions"><span class="sample" data-marker="sample">Sample data - fictional</span></div>';
+  document.getElementById('legend').innerHTML = '<div class="legend-key" aria-label="Legend">' + ['today', 'proposed', 'assumption'].map(function (k) { return chip(k); }).join('') + '</div>';
+  document.getElementById('demo-nav').innerHTML = capture ? '' : tourNav();
   if (capture) document.documentElement.classList.add('capture');
   document.body.classList.toggle('capture', capture);
-  render();
   bind();
   goTo(current, { instant: true });
-  if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(function () { fitDocs(document.querySelector('[data-step-panel]:not([hidden])')); });
-  }
 
   window.demo = {
     goTo: function (n) { return goTo(n); },
     steps: STEP_COUNT,
-    get prospect() { return prospectId; },
     get step() { return current; },
     next: function () { return goTo(current + 1); },
     prev: function () { return goTo(current - 1); },
-    setProspect: setProspect,
-    settled: function () { return settlePromise; }
+    settled: function () { return settlePromise; },
+    xirr: function () { return xirr(cashRows()); }
   };
 })();

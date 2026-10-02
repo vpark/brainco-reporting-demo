@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>Explain the change (sample data)</title>
+<title>Brain Co. LP reporting demo (sample data)</title>
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="css/demo.css">
 </head>
@@ -19,11 +19,15 @@
     </div>
     <div id="legend"></div>
   </section>
-  <main class="stage" id="stage"></main>
-  <nav class="demo-nav" id="demo-nav" aria-label="Demo navigation"></nav>
+  <div class="shell" id="shell">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main"></main>
+    <aside class="drawer" id="drawer" aria-label="Sources" hidden></aside>
+  </div>
+  <nav class="demo-nav" id="demo-nav" aria-label="Guided tour"></nav>
 </div>
 <noscript><p class="noscript">This demo needs JavaScript. All data shown is fictional sample data.</p></noscript>
-<script src="data/prospects.js"></script>
+<script src="data/demo-data.js"></script>
 <script src="js/demo.js"></script>
 </body>
 </html>
