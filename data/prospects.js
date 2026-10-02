@@ -101,6 +101,36 @@ window.BRAINCO_DEMO_DATA = {
         signedOff: 'Oct 23, 11:40 AM',
         approved: 'Nov 4, 4:12 PM'
       },
+      vault: {
+        sources: [
+          { type: 'Excel', files: [
+            { name: 'Fund II Valuation Model Q3 2026.xlsx', synced: 'Synced Oct 16, 6:00 PM', claims: 96 },
+            { name: 'Fund admin capital account statements Q3 2026.xlsx', synced: 'Synced Oct 15, 4:30 PM', claims: 41 }
+          ] },
+          { type: 'PDF', files: [
+            { name: 'Northwind Cold Chain Q3 board deck.pdf', synced: 'Synced Oct 9, 11:20 AM', claims: 14 },
+            { name: 'Cobalt Dental Partners Q3 board deck.pdf', synced: 'Synced Oct 10, 3:05 PM', claims: 11 },
+            { name: 'Cobalt Dental lender covenant amendment.pdf', synced: 'Synced Aug 26, 9:40 AM', claims: 3 }
+          ] },
+          { type: 'Web snapshot', files: [
+            { name: 'Cold Chain Weekly: Q3 cold-storage deal volume', synced: 'Captured Oct 12, 8:00 AM', claims: 2 }
+          ] },
+          { type: 'Prior reports', files: [
+            { name: 'Q2 2026 LP letter, approved v4', synced: 'Approved Aug 7', claims: 52 }
+          ] },
+          { type: 'Voice notes', files: [
+            { name: 'Partner interview, Q3 portfolio review', synced: 'Synced Oct 14, 2:15 PM', claims: 9 }
+          ] }
+        ],
+        sections: [
+          { name: 'Fund overview', status: 'Approved', verified: 18, total: 18 },
+          { name: 'Fund II performance', status: 'Needs explanation', verified: 41, total: 42 },
+          { name: 'Portfolio updates', status: 'Draft', verified: 64, total: 66 },
+          { name: 'Valuation changes', status: 'Verified', verified: 38, total: 38 },
+          { name: 'Capital activity', status: 'Verified', verified: 29, total: 29 },
+          { name: 'Outlook', status: 'Draft', verified: 21, total: 21 }
+        ]
+      },
       config: [
         { k: 'Brand template', v: 'Meridian LP 2026: deck, schedules, letter' },
         { k: 'Metric definition', v: 'Net IRR: XIRR of LP net cash flows, NAV as terminal value' },
@@ -205,6 +235,36 @@ window.BRAINCO_DEMO_DATA = {
         edited: 'Oct 27, 9:30 AM',
         signedOff: 'Oct 27, 4:05 PM',
         approved: 'Nov 10, 11:20 AM'
+      },
+      vault: {
+        sources: [
+          { type: 'Excel', files: [
+            { name: 'Fund III Valuation Model Q3 2026.xlsx', synced: 'Synced Oct 20, 5:30 PM', claims: 88 },
+            { name: 'Fund admin capital account statements Q3 2026.xlsx', synced: 'Synced Oct 19, 2:10 PM', claims: 37 }
+          ] },
+          { type: 'PDF', files: [
+            { name: 'Lakeshore Commons Q3 property operating report.pdf', synced: 'Synced Oct 13, 10:45 AM', claims: 18 },
+            { name: 'Bayview Logistics Center Q3 appraisal report.pdf', synced: 'Synced Oct 15, 4:20 PM', claims: 9 },
+            { name: 'Bayview Logistics Center rent roll, September 2026.pdf', synced: 'Synced Oct 6, 9:10 AM', claims: 4 }
+          ] },
+          { type: 'Web snapshot', files: [
+            { name: 'Logistics Property Ledger: Q3 industrial cap rates', synced: 'Captured Oct 14, 7:30 AM', claims: 2 }
+          ] },
+          { type: 'Prior reports', files: [
+            { name: 'Q2 2026 LP letter, approved v3', synced: 'Approved Aug 12', claims: 47 }
+          ] },
+          { type: 'Voice notes', files: [
+            { name: 'Partner interview, Q3 asset review', synced: 'Synced Oct 16, 11:00 AM', claims: 8 }
+          ] }
+        ],
+        sections: [
+          { name: 'Fund overview', status: 'Approved', verified: 16, total: 16 },
+          { name: 'Value-Add Fund III performance', status: 'Needs explanation', verified: 37, total: 38 },
+          { name: 'Property updates', status: 'Draft', verified: 58, total: 60 },
+          { name: 'Valuation changes', status: 'Verified', verified: 34, total: 34 },
+          { name: 'Capital activity', status: 'Verified', verified: 26, total: 26 },
+          { name: 'Outlook', status: 'Draft', verified: 19, total: 19 }
+        ]
       },
       config: [
         { k: 'Brand template', v: 'Harborline 2026: deck, schedules, letter' },

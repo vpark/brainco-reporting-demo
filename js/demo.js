@@ -111,6 +111,7 @@
     prior: '<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.6" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M6 3.4V6l1.8 1.2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
     check: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.3l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     arrow: '<svg viewBox="0 0 16 10" aria-hidden="true"><path d="M1 5h13M10 1.5L14 5l-4 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    lock: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="5.2" width="7" height="5.3" rx="1" fill="none" stroke="currentColor" stroke-width="1.1"/><path d="M4 5.2V3.8a2 2 0 0 1 4 0v1.4" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
     flag: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 10.5V1.8M3 2h6l-1.4 2.2L9 6.4H3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>'
   };
 
@@ -299,41 +300,65 @@
   }
 
   function step0() {
-    var v = focusVehicle(), d = derive(v), pp = P.people, s = sources();
-    var ms = P.package.milestones.map(function (m, i) {
-      var st = i === 0 ? 'done' : i === 1 ? 'now' : 'next';
-      return '<li class="ms ms-' + st + '"><span class="ms-dot">' + (st === 'done' ? ICON.check : '') + '</span><span class="ms-label">' + m.label + '</span><span class="ms-date">' + m.date + '</span></li>';
+    var v = focusVehicle(), d = derive(v), pp = P.people, s = sources(), V = P.vault;
+    var groupChip = { 'Excel': chip('today', 'Excel-based agents read the workbooks'), 'Voice notes': chip('today', 'Voice interview capture') };
+    var pending = { name: 'Partner interview: ' + v.short + ' net IRR, ' + pp.partner.name, synced: 'Requested ' + P.request.sentOn + ', not yet recorded', claims: 0, pending: true };
+    var groups = V.sources.map(function (g) {
+      var files = g.files.concat(g.type === 'Voice notes' ? [pending] : []);
+      return '<li class="vg"><div class="vg-head"><b>' + esc(g.type) + '</b><span>' + files.length + '</span>' + (groupChip[g.type] || '') + '</div><ul>' +
+        files.map(function (f) {
+          return '<li class="vf' + (f.pending ? ' is-pending' : '') + '"><span class="vf-name">' + esc(f.name) + '</span><span class="vf-meta">' + esc(f.synced) + '</span><span class="vf-use">' + (f.pending ? 'Pending' : 'Used in ' + f.claims + ' claims') + '</span></li>';
+        }).join('') + '</ul></li>';
     }).join('');
-    var timeline = panel({ id: 'package', legend: 'proposed', why: 'Report-cycle workspace', kicker: P.firm, title: P.package.name + ' · in preparation',
-      body: '<ol class="milestones">' + ms + '</ol>' });
-    var o = P.package.outputs;
-    function tile(kind, name, meta) {
-      return '<figure class="tile">' + frame(kind, 'draft') + '<figcaption><b>' + name + '</b><span>' + meta + '</span><span class="pill pill-draft">Draft</span></figcaption></figure>';
-    }
-    var outputs = panel({ id: 'outputs', legend: 'today', why: 'Brand-compliant output generation across Word, PPT and Excel', kicker: 'Rendered from the package', title: 'Outputs for limited partners', cls: 'panel-outputs',
-      body: '<div class="tiles">' + tile('deck', 'LP deck', o.deckSlides + ' slides') + tile('excel', 'Excel schedules', P.package.workbookTabs.length + ' tabs') + tile('letter', 'LP letter', o.letterPages + ' pages') + '</div>' });
-    var vrows = P.vehicles.map(function (x) {
-      var xd = derive(x), isF = x.id === v.id;
-      return '<tr class="' + (isF ? 'is-focus' : '') + '"><td>' + esc(x.name) + '</td><td class="r">' + x.vintage + '</td><td class="r">' + money(x.commitments) + '</td><td class="r">' + money(x.nav) + '</td><td class="r">' + mult(xd.tvpi) + '</td><td class="r">' + pct(x.irr) + (isF ? ' <span class="pill pill-flag">' + ICON.flag + bps(xd.dBps) + '</span>' : '') + '</td></tr>';
+    var nFiles = V.sources.reduce(function (a, g) { return a + g.files.length; }, 0);
+    var vault = panel({ id: 'vault', legend: 'proposed', why: 'Source vault kept in sync: Excel, PDF, web snapshots, transcripts', kicker: 'Sources · ' + P.period.label, title: nFiles + ' files, 1 requested', cls: 'panel-vault',
+      body: '<ul class="vault">' + groups + '</ul>' });
+
+    var cfg = {};
+    P.config.forEach(function (k) { cfg[k.k] = k.v; });
+    var total = 0, verified = 0, explain = 0;
+    var STATUS = { 'Approved': 'ok', 'Verified': 'ok', 'Draft': 'draft', 'Needs explanation': 'flag' };
+    var rows = V.sections.map(function (x, i) {
+      total += x.total; verified += x.verified;
+      var isF = x.status === 'Needs explanation';
+      if (isF) explain += 1;
+      return '<li class="sec' + (isF ? ' is-focus' : '') + '"><span class="sec-n">' + (i + 1) + '</span><span class="sec-name">' + esc(x.name) + '</span>' +
+        '<span class="sec-st st-' + STATUS[x.status] + '">' + x.status + '</span><span class="sec-count">' + x.verified + ' of ' + x.total + ' verified</span>' +
+        '<span class="sec-bar"><i style="width:' + (100 * x.verified / x.total).toFixed(1) + '%"></i></span></li>';
     }).join('');
-    var vehicles = panel({ id: 'vehicles', legend: 'proposed', why: 'Report object model: vehicle, asset, period, metric, commentary block, source', kicker: P.strategy + ' · as of ' + P.period.asOf, title: 'Vehicles in this package',
-      body: '<table class="mini"><thead><tr><th>Vehicle</th><th class="r">Vintage</th><th class="r">Commitments</th><th class="r">NAV</th><th class="r">Net TVPI</th><th class="r">Net IRR</th></tr></thead><tbody>' + vrows + '</tbody></table>' });
+    var conflicts = total - verified - explain;
+    var outline = panel({ id: 'outline', legend: 'proposed', why: 'Report outline with section status, assembled from the configured template', kicker: 'Report builder · configured template', title: 'LP report outline', cls: 'panel-outline',
+      body: '<ol class="outline">' + rows + '</ol>' });
     var flag = panel({ id: 'flag', legend: 'proposed', why: 'Prior-period diff with an explanation rule', kicker: 'Needs explanation', title: esc(v.short) + ' · ' + P.focus.metric, cls: 'panel-flag',
       body: '<div class="flag-figs"><span class="was">' + pct(v.irrPrior) + '</span>' + ICON.arrow + '<span class="now">' + pct(v.irr) + '</span><span class="delta">' + bps(d.dBps) + '</span></div>' +
         '<p>Over the ' + P.focus.rule.irrBps + ' bps rule. Explanation requested from ' + esc(pp.partner.name) + '.</p>' +
         '<div class="cite-row">' + cite('M1', s) + cite('P1', s) + '</div>' });
-    var registry = panel({ id: 'registry', legend: 'proposed', why: 'Figure registry: one approved number feeds every output', kicker: 'Figure registry', title: P.package.figures + ' figures, one source of truth',
-      body: '<div class="reg-bar"><span style="flex:' + (P.package.figures - 1) + '"></span><i></i></div>' +
-        '<dl class="reg-stats"><div><dt>Within rule</dt><dd>' + (P.package.figures - 1) + '</dd></div><div><dt>Needs explanation</dt><dd class="amber">1</dd></div><div><dt>Outputs fed</dt><dd>3</dd></div></dl>' });
-    var people = panel({ id: 'people', legend: 'proposed', why: 'Approval chain is customer configuration', kicker: 'Approval chain · configured', title: 'People on this package',
-      body: '<ul class="people-list">' + [
-        [pp.ir, 'Assembles the package'],
-        [pp.partner, 'Explains changes, signs off commentary'],
-        [pp.cfo, 'Approves for distribution']
-      ].map(function (r) { return '<li>' + avatar(r[0]) + '<div><b>' + esc(r[0].name) + '</b><span>' + esc(r[0].role) + '</span></div><em>' + r[1] + '</em></li>'; }).join('') + '</ul>' });
-    var fit = panel({ id: 'fit', legend: 'assumption', why: 'Signals sales can spot before deployment; to audit against current engagements', kicker: 'Why this prospect fits', title: 'Signals visible before deployment',
-      body: '<ul class="tags"><li>Quarterly LP cycle</li><li>' + P.vehicles.length + ' vehicles</li><li>CFO-led close</li><li>Signed, reconciled letter</li></ul>' });
-    return '<div class="grid g0"><div class="col-main">' + timeline + outputs + vehicles + '</div><div class="col-side">' + flag + registry + people + fit + '</div></div>';
+
+    var verify = panel({ id: 'verify', legend: 'proposed', why: 'Every claim checked against its source', kicker: 'Verification', title: total + ' claims checked against sources', cls: 'panel-verify',
+      body: '<div class="reg-bar ver-bar"><span style="flex:' + verified + '"></span><b style="flex:' + conflicts + '"></b><i></i></div>' +
+        '<dl class="reg-stats"><div><dt>Verified</dt><dd>' + verified + '</dd></div><div><dt>Conflicts</dt><dd class="neg">' + conflicts + '</dd></div><div><dt>Needs explanation</dt><dd class="amber">' + explain + '</dd></div></dl>' });
+    var places = [
+      ['LP deck', 'Slide ' + P.focus.deckSlide + ', performance table'],
+      ['Excel schedule', scheduleSheet() + '!' + excelCell()],
+      ['LP letter', 'Page ' + P.focus.letterPage + ', ' + v.short + ' paragraph']
+    ];
+    var tag = panel({ id: 'datatag', legend: 'proposed', why: 'Data tag: one approved, versioned value per fact, linked to every place it appears', kicker: 'Data tag · ' + esc(P.focus.registryId), title: esc(v.short) + ' ' + P.focus.metric + ' · ' + pct(v.irr), cls: 'panel-tag',
+      body: '<ul class="places">' + places.map(function (p) { return '<li><b>' + p[0] + '</b><span>' + esc(p[1]) + '</span><em>Linked</em></li>'; }).join('') + '</ul>' +
+        '<p class="foot muted">Appears in ' + places.length + ' places. Approving the figure updates all of them.</p>' });
+
+    var check = panel({ id: 'verify-assumption', legend: 'assumption', why: 'Reviewer behavior to validate in the pilot', kicker: 'To validate', title: 'Reviewers trust the source check',
+      body: '<p>A claim-level check against the vault replaces re-tying every figure by hand. Measure review hours in the pilot.</p>' });
+    var keys = ['Brand template', 'Metric definition', 'Approval chain', 'Audience variants'];
+    var config = panel({ id: 'config', legend: 'proposed', why: 'Customer configuration, no code', kicker: 'Configuration in effect', title: 'Configured for ' + esc(P.shortFirm), cls: 'panel-config',
+      body: '<dl class="b-kv cfg">' + keys.filter(function (k) { return cfg[k]; }).map(function (k) { return '<div><dt>' + esc(k) + '</dt><dd>' + esc(cfg[k]) + '</dd></div>'; }).join('') + '</dl>' });
+    var o = P.package.outputs;
+    var targets = [['LP deck', '.pptx', o.deckSlides + ' slides'], ['Excel schedule', '.xlsx', P.package.workbookTabs.length + ' tabs'], ['LP letter', '.docx', o.letterPages + ' pages']];
+    var exportsP = panel({ id: 'exports', legend: 'proposed', why: 'Export locked until approval', kicker: 'Export', title: 'Locked until ' + esc(pp.cfo.role) + ' approval', cls: 'panel-exports',
+      body: '<ul class="exports">' + targets.map(function (x) { return '<li><span class="lock" aria-hidden="true">' + ICON.lock + '</span><b>' + x[0] + '</b><span class="ext">' + x[1] + '</span><span>' + x[2] + '</span></li>'; }).join('') + '</ul>' +
+        '<div class="brand-out">' + chip('today', 'Brand-compliant output generation across Word, PPT and Excel') + '<span>Brand-compliant rendering to Word, PPT and Excel</span></div>' });
+
+    return '<div class="grid g0"><div class="col-vault">' + vault + '</div><div class="col-main">' + outline + flag + '</div>' +
+      '<div class="col-side">' + verify + tag + check + '</div><div class="col-side">' + config + exportsP + '</div></div>';
   }
 
   function step1() {
@@ -523,26 +548,33 @@
 
     function li(items) { return '<ul>' + items.map(function (i) { return '<li>' + i + '</li>'; }).join('') + '</ul>'; }
     function item(text, kind) { return '<span class="b-item">' + text + '</span>' + chip(kind); }
-    var shared = '<div class="b-col" data-element="b-shared"><div class="b-head"><b>Shared product</b><span>Same for every customer</span>' + chip('proposed', 'Built once by Brain Co.') + '</div>' +
+    var blocks = '<div class="b-sub" data-element="b-blocks"><div class="b-head"><b>Shared building blocks</b>' + chip('proposed', 'Built once by Brain Co. and used in every engagement') + '<span>Every segment, built once</span></div>' +
       '<ul class="b-list">' +
-      '<li>' + item('Report object model: vehicle, asset, period, metric, commentary, source', 'proposed') + '</li>' +
-      '<li>' + item('Figure registry: one approved number feeds every output', 'proposed') + '</li>' +
+      '<li>' + item('Source vault (Excel, PDF, web snapshots, transcripts) kept in sync', 'proposed') + '</li>' +
+      '<li>' + item('Figure registry: one approved, versioned value per fact', 'proposed') + '</li>' +
       '<li>' + item('Source-linked citations', 'today') + '</li>' +
       '<li>' + item('Voice interview capture', 'today') + '</li>' +
-      '<li>' + item('Commentary drafted from prior-period text', 'proposed') + '</li>' +
-      '<li>' + item('Review and approval with version history and prior-period diff', 'proposed') + '</li>' +
+      '<li>' + item('Brand-compliant output across Word, PPT and Excel', 'today') + '</li>' +
+      '<li>' + item('Review and approval with version history', 'proposed') + '</li>' +
       '<li>' + item('Feedback capture', 'today') + '</li>' +
       '<li>' + item('Evaluation harness', 'proposed') + '</li>' +
       '</ul></div>';
-    var configured = '<div class="b-col b-config" data-element="b-config"><div class="b-head"><b>Configured for ' + esc(P.shortFirm) + '</b><span>By the deployment team, no code</span>' + chip('proposed', 'Customer configuration') + '</div>' +
+    var product = '<div class="b-sub" data-element="b-product"><div class="b-head"><b>Investor-reporting product</b>' + chip('proposed', 'First product, built on the building blocks') + '<span>Private equity and real estate</span></div>' +
+      '<ul class="b-list">' +
+      '<li>' + item('Report object model: fund or vehicle, asset, period, metric, commentary block, source', 'proposed') + '</li>' +
+      '<li>' + item('Prior-period diff with the explain-the-change rule', 'proposed') + '</li>' +
+      '<li>' + item('LP package templates rendered once to deck, Excel and letter, with a consistency check', 'proposed') + '</li>' +
+      '</ul></div>';
+    
+    var configured = '<div class="b-col b-config" data-element="b-config"><div class="b-head"><b>Configured for ' + esc(P.shortFirm) + '</b>' + chip('proposed', 'Customer configuration') + '<span>Per customer, by the deployment team, no code</span></div>' +
       '<dl class="b-kv">' + P.config.map(function (k) { return '<div><dt>' + esc(k.k) + '</dt><dd>' + esc(k.v) + '</dd></div>'; }).join('') + '</dl></div>';
-    var bespoke = '<div class="b-col" data-element="b-bespoke"><div class="b-head"><b>Bespoke</b><span>Priced as services</span>' + chip('proposed', 'Outside the object model') + '</div>' +
-      li(P.bespoke.map(esc)) + '<p class="muted small">One-off analyses, unusual connectors, non-recurring report types.</p></div>';
-    var declined = '<div class="b-declined" data-element="b-declined"><div class="b-head"><b>Declined in year one</b>' + chip('proposed', 'A proposed decision, not a product part: work that would fragment the product') + '<span>A proposed decision, not a product part</span></div>' +
-      '<ul class="tags quiet"><li>Hospitality expansion</li><li>All enterprise reporting</li><li>Per-customer forks</li><li>Real-time dashboards</li><li>Self-serve template builder</li><li>External LP portal</li></ul></div>';
-    var test = '<div class="b-test" data-element="b-test">' + chip('assumption', 'Provisional thresholds, reset after the retrospective') + '<p>Configuration-only onboarding is the bet. A retrospective on two past quarters must reach about 75% of report content from configuration with zero code changes, and the paid pilot runs on a fixed configuration budget with no forks. Stop scaling under about 60%. All thresholds are provisional.</p></div>';
-    var overlay = '<aside class="overlay" data-element="boundary"><header class="overlay-head"><div><div class="kicker">Product boundary</div><h3>What Brain Co. standardizes, configures and prices as services</h3></div>' + chip('proposed', 'Shared product, customer configuration, bespoke') + '</header>' +
-      '<div class="b-grid">' + shared + configured + bespoke + '</div>' + declined + test + '</aside>';
+    var bespoke = '<div class="b-col" data-element="b-bespoke"><div class="b-head"><b>Bespoke services</b>' + chip('proposed', 'Outside the object model') + '<span>Priced separately: one-off analyses, unusual data connectors, non-recurring report types</span></div>' +
+      li(P.bespoke.map(esc)) + '</div>';
+    var declined = '<div class="b-declined" data-element="b-later"><div class="b-head"><b>Not this year</b>' + chip('proposed', 'A proposed decision, not a product part: work that would fragment the product') + '<span>Hospitality still gets the shared building blocks through deployment work.</span></div>' +
+      '<ul class="tags quiet"><li>A hospitality product</li><li>All enterprise reporting</li><li>A general workflow platform</li><li>Per-customer forks</li><li>Real-time dashboards</li><li>Self-serve template builder</li><li>External LP portal</li></ul></div>';
+    var test = '<div class="b-test" data-element="b-test">' + chip('assumption', 'Assumes a pipeline across all three segments; thresholds are provisional') + '<p>Assumes a pipeline across all three segments; with only these three customers, build nothing shared and keep working out go-to-market. A retrospective on two past quarters must reach about 75% of content from configuration before one paid single-quarter pilot. Under about 60%, stop the product; the building blocks stay. Thresholds are provisional.</p></div>';
+    var overlay = '<aside class="overlay" data-element="boundary"><header class="overlay-head"><div><div class="kicker">Product boundary</div><h3>Shared building blocks, one product on top, the rest configured</h3></div>' + chip('proposed', 'Shared building blocks, investor-reporting product, customer configuration, bespoke') + '</header>' +
+      '<div class="b-grid"><div class="b-col b-stack">' + blocks + product + test + '</div><div class="b-stack b-side">' + configured + bespoke + declined + '</div></div>' + '</aside>';
     return '<div class="grid g6"><div class="col-main dimmed">' + audit + versions + '</div>' + overlay + '</div>';
   }
 

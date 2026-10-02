@@ -1,6 +1,6 @@
 # Explain the change: a sample sales demo
 
-An interactive walkthrough prepared by Vincent Park for a Brain Co. product case study. It shows one consequential moment in a quarterly LP reporting workflow: a figure changes, the responsible partner explains it, a cited draft is reviewed, and one approval updates the LP deck, Excel schedule and letter together.
+An interactive walkthrough prepared by Vincent Park for a Brain Co. product case study. It opens on a quarter's source vault and report builder, then shows one consequential moment in a quarterly LP reporting workflow: a figure changes, the responsible partner explains it, a cited draft is reviewed, and one approval updates the LP deck, Excel schedule and letter together.
 
 All firms, people and figures are fictional sample data.
 
